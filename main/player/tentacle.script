@@ -1,0 +1,79 @@
+go.property("target_pos", vmath.vector3())
+go.property("owner_pos", vmath.vector3())
+go.property("index", 1)
+go.property("use_speed", false) -- If true, uses speed-based movement. If false, follows in realtime
+go.property("speed", 2000) -- Speed in units per second (only used if use_speed is true)
+
+local REACHED = hash("reached")
+
+function init(self)
+	self.texture_width = 32
+	self.current_target = vmath.vector3(self.target_pos) -- Interpolated target position
+	self.was_using_speed = false -- Track previous state to initialize current_target properly
+end
+
+function update(self, dt)
+	local player_pos = self.owner_pos
+	local target = self.target_pos
+	local current_target
+	
+	if self.use_speed then
+		-- If use_speed just got enabled, initialize current_target from last real-time position
+		if not self.was_using_speed then
+			-- Keep the last known position (self.current_target should already have it)
+			-- Don't overwrite it with target since target might already be the new destination
+			self.was_using_speed = true
+		end
+		
+		-- Speed-based movement: Interpolate current_target towards actual target_pos
+		local diff_to_target = target - self.current_target
+		local dist_to_target = vmath.length(diff_to_target)
+		
+		if dist_to_target > 0.1 then
+			local max_move = self.speed * dt
+			if dist_to_target <= max_move then
+				-- Close enough, snap to target
+				self.current_target = vmath.vector3(target)
+			else
+				-- Move towards target by speed amount
+				local direction = vmath.normalize(diff_to_target)
+				self.current_target = self.current_target + direction * max_move
+			end
+		end
+		
+		current_target = self.current_target
+	else
+		-- Realtime follow: use target position directly
+		current_target = target
+		-- Keep updating current_target so when we switch to speed mode, it starts from here
+		self.current_target = vmath.vector3(target)
+		self.was_using_speed = false
+	end
+
+
+	-- 1. Calcular vector dirección
+	local diff = current_target - player_pos
+	local distance = vmath.length(diff)
+
+	-- Evitamos errores si la distancia es 0
+	if distance < 1 then
+		msg.post("player#player", REACHED, { index = self.index })
+
+		go.set_position(player_pos)
+		go.set_scale(vmath.vector3(0.1, 0.1, 0.1))
+		return
+	end
+
+
+	local angle = math.atan2(diff.y, diff.x)
+	local rotation = vmath.quat_rotation_z(angle)
+
+	local scale_y = distance / self.texture_width
+	local position_after_scale = player_pos +
+		vmath.rotate(rotation, vmath.vector3(self.texture_width * scale_y / 2, 0, 0))
+	position_after_scale.z = 0
+
+	go.set_position(position_after_scale)
+	go.set_rotation(rotation)
+	go.set_scale(vmath.vector3(scale_y, 1, 1))
+end

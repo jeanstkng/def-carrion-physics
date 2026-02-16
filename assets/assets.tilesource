@@ -1,0 +1,17 @@
+image: "/assets/tile.png"
+tile_width: 128
+tile_height: 128
+collision: "/assets/tile.png"
+convex_hulls {
+  index: 0
+  count: 16
+  collision_group: "tile"
+}
+collision_groups: "tile"
+animations {
+  id: "anim"
+  start_tile: 1
+  end_tile: 1
+  playback: PLAYBACK_NONE
+  fps: 1
+}

@@ -1,0 +1,12 @@
+local TILE = hash("tile")
+local CONTACT_POINT_RESPONSE = hash("contact_point_response")
+local PARTICLE_TOUCHED_WALL = hash("particle_touched_wall")
+
+
+function on_message(self, message_id, message, sender)
+	if message_id == CONTACT_POINT_RESPONSE then
+		if message.other_group == TILE then
+			msg.post("player#player", PARTICLE_TOUCHED_WALL, { position = message.position, normal = message.normal, go_id = go.get_id() })
+		end
+	end
+end

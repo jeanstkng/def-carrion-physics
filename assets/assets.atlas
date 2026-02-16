@@ -1,0 +1,13 @@
+images {
+  image: "/assets/player.png"
+}
+images {
+  image: "/assets/tentacle.png"
+}
+images {
+  image: "/assets/tile.png"
+}
+images {
+  image: "/assets/blood_splat.png"
+}
+extrude_borders: 2
