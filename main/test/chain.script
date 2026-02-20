@@ -1,0 +1,141 @@
+local function draw_line(from, to)
+	msg.post("@render:", "draw_line", { start_point = from, end_point = to, color = vmath.vector4(1, 0, 0, 1) }) -- <1>
+end
+
+local function get_chain_transform(pos_a, pos_b, link_count)
+	local diff = pos_b - pos_a
+	local distance = vmath.length(diff)
+	local direction = vmath.normalize(diff)
+
+	-- Angle in radians (atan2 gives angle from X axis)
+	local angle = math.atan2(direction.y, direction.x)
+	local rotation = vmath.quat_rotation_z(angle)
+
+	local spacing = distance / link_count
+
+	return {
+		distance = distance,
+		direction = direction,
+		rotation = rotation,
+		spacing = spacing
+	}
+end
+
+function init(self)
+	msg.post(".", "acquire_input_focus")
+	local center_anchor = vmath.vector3(0, 0, 0)
+	local pivot = "go#collisionobject"
+	self.chains = {}
+	self.chain_ids = {}
+	self.pivot_pos = go.get_position()
+	self.mouse_world = vmath.vector3(0, 0, 0)
+
+	-- physics.create_joint(physics.JOINT_TYPE_FIXED, "/chain1#collisionobject", "chain1_fixed_joint", center_anchor, pivot,
+	-- 	center_anchor,
+	-- 	{ max_length = 5 })
+
+	local pos_b = vmath.vector3(703.0, 597.0, 0) -- your point B
+
+	local link_count = 16
+	local transform = get_chain_transform(self.pivot_pos, pos_b, link_count)
+
+	spawn_chain(self, self.pivot_pos, transform, link_count)
+
+	-- for i = 1, 16, 1 do
+	-- 	table.insert(self.chains, "/chain" .. i .. "#collisionobject")
+	-- 	table.insert(self.chains_id, "/chain" .. i)
+	-- end
+
+	-- for index, value in ipairs(self.chains) do
+	-- 	if index ~= 1 then
+	-- 		local prev_chain = self.chains[index - 1]
+	-- 		physics.create_joint(physics.JOINT_TYPE_FIXED, value, "chain" .. index .. "_fixed_joint",
+	-- 			center_anchor, prev_chain, center_anchor, { max_length = 20 })
+	-- 	end
+	-- end
+end
+
+function spawn_chain(self, pos_a, transform, link_count)
+	local center_anchor = vmath.vector3(0, 0, 0)
+
+	for i = 1, link_count do
+		-- Position each link evenly along the direction vector
+		local offset = transform.direction * (transform.spacing * (i - 0.5))
+		local world_pos = pos_a + offset
+		world_pos.z = 0
+
+		-- Spawn via factory, passing rotation so the link sprite aligns
+		local id = factory.create(
+			"/factories#chain_factory",
+			world_pos,
+			transform.rotation, -- aligns the link along A->B
+			{},                 -- properties
+			1                   -- scale
+		)
+
+		table.insert(self.chain_ids, id)
+
+		-- Build collision object URL from spawned id
+		local co_url = msg.url(nil, id, "collisionobject")
+		table.insert(self.chains, co_url)
+	end
+
+	-- Joint to pivot/anchor at pos_a
+	local pivot_url = "go#collisionobject"
+	physics.create_joint(
+		physics.JOINT_TYPE_FIXED,
+		self.chains[1],
+		"chain1_fixed_joint",
+		center_anchor,
+		pivot_url,
+		center_anchor,
+		{ max_length = 5 }
+	)
+
+	-- Chain links together
+	for i = 2, #self.chains do
+		physics.create_joint(
+			physics.JOINT_TYPE_FIXED,
+			self.chains[i],
+			"chain" .. i .. "_fixed_joint",
+			center_anchor,
+			self.chains[i - 1],
+			center_anchor,
+			{ max_length = transform.spacing }
+		)
+	end
+end
+
+function update(self, dt)
+	for index, value in ipairs(self.chain_ids) do
+		local weight_pos = go.get_position(value)
+		draw_line(self.pivot_pos, weight_pos)
+	end
+
+	if self.mouse_pressed then
+		go.set_position(self.mouse_world)
+	end
+end
+
+function on_message(self, message_id, message, sender)
+	-- Add message-handling code here
+	-- Learn more: https://defold.com/manuals/message-passing/
+	-- Remove this function if not needed
+end
+
+function on_input(self, action_id, action)
+	if not action_id then
+		self.last_screen_pos = vmath.vector3(action.screen_x, action.screen_y, 0)
+		self.mouse_world = self.last_screen_pos
+	elseif action_id == hash("touch") then
+		if action.pressed then
+			self.mouse_pressed = true
+		elseif action.released then
+			self.mouse_pressed = false
+		end
+	elseif action_id == hash("secondary_touch") then
+		if action.pressed then
+			go.set_position(self.last_screen_pos, "/chain16")
+		end
+	end
+end

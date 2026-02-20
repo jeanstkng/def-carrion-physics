@@ -1,5 +1,5 @@
 [bootstrap]
-main_collection = /main/main.collectionc
+main_collection = /main/main_new.collectionc
 render = /render/render.renderc
 
 [script]
@@ -14,7 +14,7 @@ high_dpi = 1
 input_method = HiddenInputField
 
 [physics]
-gravity_y = -1000.0
+gravity_y = -700.0
 scale = 0.01
 
 [html5]

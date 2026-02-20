@@ -1,0 +1,24 @@
+name: "rope_test"
+scale_along_z: 0
+embedded_instances {
+  id: "go"
+  data: "components {\n"
+  "  id: \"tentacle\"\n"
+  "  component: \"/main/tentacle.script\"\n"
+  "}\n"
+  ""
+  position {
+    x: 280.0
+    y: 446.0
+  }
+}
+embedded_instances {
+  id: "factories"
+  data: "embedded_components {\n"
+  "  id: \"chain_factory\"\n"
+  "  type: \"factory\"\n"
+  "  data: \"prototype: \\\"/main/test/chain_copy.go\\\"\\n"
+  "\"\n"
+  "}\n"
+  ""
+}

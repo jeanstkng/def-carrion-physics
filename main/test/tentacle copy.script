@@ -1,0 +1,180 @@
+-- tentacle.go script
+local fabrik = require("main.test.fabrik")
+
+local SEGMENT_COUNT = 20
+local SEGMENT_LENGTH = 18
+local DAMPING = 0.15          -- lower = more lag/sway (0.05 very sluggish, 0.3 snappy)
+local WAVE_AMPLITUDE = 30     -- side-to-side sway strength
+local WAVE_FREQUENCY = 2.5    -- oscillation speed
+local WAVE_PHASE_OFFSET = 0.4 -- phase shift per segment (creates the wave travel)
+
+function init(self)
+	msg.post(".", "acquire_input_focus")
+
+	self.chain_ids = {}
+	self.segments = {}
+	self.velocities = {}
+	self.lengths = {}
+	self.time = 0
+
+	local base = go.get_world_position()
+
+	for i = 1, SEGMENT_COUNT do
+		local spawn_pos = vmath.vector3(base.x, base.y - (i * SEGMENT_LENGTH), 0)
+
+		local id = factory.create(
+			"/factories#chain_factory",
+			spawn_pos,
+			vmath.quat(), -- identity rotation, IK will control it
+			{},
+			1
+		)
+
+		table.insert(self.chain_ids, id)
+		table.insert(self.segments, spawn_pos)
+		table.insert(self.velocities, vmath.vector3(0, 0, 0))
+		table.insert(self.lengths, SEGMENT_LENGTH)
+	end
+
+	self.target = vmath.vector3(self.segments[SEGMENT_COUNT])
+	self.smooth_target = vmath.vector3(self.target)
+	self.active_segments = SEGMENT_COUNT
+	self.retracting = false
+	self.retract_speed = 100
+end
+
+function update(self, dt)
+    self.time = self.time + dt
+    local origin = go.get_world_position()
+
+    if self.retracting then
+        local to_origin = origin - self.target
+        local dist = vmath.length(to_origin)
+
+        if dist > 5 then
+            self.target = self.target + vmath.normalize(to_origin) * self.retract_speed * dt
+        end
+
+        -- Shrink from the pivot end, not the player end
+        local total_length = SEGMENT_COUNT * SEGMENT_LENGTH
+        local t = 1.0 - (dist / total_length)
+        self.active_segments = math.max(1, math.floor(SEGMENT_COUNT * (1.0 - t)))
+
+        for i = 1, SEGMENT_COUNT do
+            local visible = i <= self.active_segments
+            local action = visible and "enable" or "disable"
+            msg.post(msg.url(nil, self.chain_ids[i], "sprite"), action, {})
+        end
+
+        if dist <= 5 then
+            finish_retract(self)
+            return
+        end
+
+        -- During retraction: anchor is the TARGET (pivot side), tip comes toward player
+        -- So we flip the FABRIK solve: origin=target, target=player
+        self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, origin)
+
+        local active_segs = {}
+        local active_lengths = {}
+        for i = 1, self.active_segments do
+            table.insert(active_segs, self.segments[i])
+            table.insert(active_lengths, self.lengths[i])
+        end
+
+        -- Anchor at the pivot (self.target), tip reaches toward player (origin)
+        fabrik.solve(active_segs, self.target, self.smooth_target, active_lengths, 8)
+
+        for i = 1, self.active_segments do
+            self.segments[i] = active_segs[i]
+        end
+
+    else
+        self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target)
+        fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 8)
+    end
+
+    apply_wave(self, dt)
+    update_visuals(self)
+end
+
+function apply_wave(self, dt)
+	for i = 2, SEGMENT_COUNT do
+		-- Perpendicular direction to the segment
+		local seg_dir
+		if i < SEGMENT_COUNT then
+			seg_dir = vmath.normalize(self.segments[i + 1] - self.segments[i - 1])
+		else
+			seg_dir = vmath.normalize(self.segments[i] - self.segments[i - 1])
+		end
+
+		-- Perpendicular = rotate direction 90 degrees
+		local perp = vmath.vector3(-seg_dir.y, seg_dir.x, 0)
+
+		-- Wave increases in amplitude toward the tip (index weight)
+		local tip_weight = (i / SEGMENT_COUNT) ^ 1.5
+        local wave = math.sin(self.time * WAVE_FREQUENCY + i * WAVE_PHASE_OFFSET)
+        
+        self.segments[i] = self.segments[i] + perp * (wave * WAVE_AMPLITUDE * tip_weight * 0.016)
+
+	end
+end
+
+function finish_retract(self)
+	self.retracting = false
+	-- Delete all spawned links
+	for _, id in ipairs(self.chain_ids) do
+		go.delete(id)
+	end
+	self.chain_ids = {}
+	-- Tell parent the tentacle is gone
+	-- msg.post("..", "tentacle_retracted")
+end
+
+function update_visuals(self)
+	for i = 1, SEGMENT_COUNT do
+		local id = self.chain_ids[i]
+		if id then
+			go.set_position(self.segments[i], id)
+
+			-- Rotate sprite to face next segment
+			local next_pos = self.segments[i + 1] or self.segments[i]
+			local prev_pos = self.segments[i - 1] or self.segments[i]
+			local dir = vmath.normalize(next_pos - prev_pos)
+			local angle = math.atan2(dir.y, dir.x) - math.pi * 0.5 -- offset if sprite points up
+			go.set_rotation(vmath.quat_rotation_z(angle), id)
+		end
+	end
+end
+
+-- Call this to move the tentacle tip toward something
+function set_target(self, world_pos)
+	self.target = vmath.vector3(world_pos)
+end
+
+function on_message(self, message_id, message)
+	if message_id == hash("set_target") then
+		set_target(self, message.position)
+	end
+end
+
+function on_input(self, action_id, action)
+	if not action_id then
+		-- Convert screen to world if needed
+		if not self.retracting then
+			
+			self.target = vmath.vector3(action.x, action.y, 0)
+		end
+	elseif action_id == hash("touch") and action.pressed then
+		print("yyyy")
+		start_retract(self)
+	end
+end
+
+function start_retract(self)
+    self.retracting = true
+    self.retract_speed = 400
+    self.active_segments = SEGMENT_COUNT
+    -- Start smooth_target at the current tip so it doesn't snap
+    self.smooth_target = vmath.vector3(self.segments[self.active_segments])
+end

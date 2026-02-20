@@ -1,0 +1,24 @@
+animations {
+  id: "idle"
+  images {
+    image: "/assets/tentacles/tentacle0000.png"
+  }
+  images {
+    image: "/assets/tentacles/tentacle0001.png"
+  }
+  images {
+    image: "/assets/tentacles/tentacle0002.png"
+  }
+  images {
+    image: "/assets/tentacles/tentacle0003.png"
+  }
+  images {
+    image: "/assets/tentacles/tentacle0004.png"
+  }
+  images {
+    image: "/assets/tentacles/tentacle0005.png"
+  }
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 15
+}
+extrude_borders: 2

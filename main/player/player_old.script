@@ -82,13 +82,11 @@ local function cast_cone(from, direction, max_distance, groups, cone_angle, num_
 	return results
 end
 
-local function drop_tentacle(self, pivot_index, player_pos)
-	for index, value in ipairs(self.active_tentacles) do
-		if value.pivot_index == pivot_index then
-			value.pivot_index = nil
-			go.animate(value.id, "target_pos", go.PLAYBACK_ONCE_FORWARD, player_pos, go.EASING_LINEAR, 0.35)
-			msg.post(value.id, "retract")
-			break
+local function find_tentacle(self)
+	for index, value in ipairs(self.tentacles) do
+		local tentacle_state = value.state
+		if tentacle_state == IDLE then
+			return value
 		end
 	end
 end
@@ -100,21 +98,26 @@ local function move_pivots_smoothly(self, hits, tentacle_moved)
 		local player_pos = go.get_position()
 		go.set_position(player_pos, self.pivot_ids[tentacle_moved])
 
-		local id = factory.create(
-			"/tentacles#factory",
-			player_pos,
-			vmath.quat(), -- identity rotation, IK will control it
-			{},
-			1
-		)
+		local tentacle_to_remove = self.active_tentacles[tentacle_moved]
+		if tentacle_to_remove then
+			local original_pivot_index = self.tentacles[tentacle_to_remove.index].pivot_index
+			if original_pivot_index then
+				self.tentacles[tentacle_to_remove.index].prev_state = self.tentacles[tentacle_to_remove.index].state
+				self.tentacles[tentacle_to_remove.index].state = RETURNING
+				go.set(self.tentacles[tentacle_to_remove.index].id, "use_speed", true)
+				table.remove(self.active_tentacles, tentacle_moved)
+				go.set(self.tentacles[tentacle_to_remove.index].id, "target_pos", go.get_position())
+			end
+		end
 
-		drop_tentacle(self, tentacle_moved, player_pos)
 
-		table.insert(self.active_tentacles, {
-			id = msg.url(nil, id, "tentacle")
-			,
-			pivot_index = tentacle_moved
-		})
+		local chosen_tentacle = find_tentacle(self)
+		if chosen_tentacle then
+			chosen_tentacle.pivot_index = tentacle_moved
+			table.insert(self.active_tentacles, tentacle_moved, chosen_tentacle)
+			self.tentacles[chosen_tentacle.index].prev_state = self.tentacles[chosen_tentacle.index].state
+			self.tentacles[chosen_tentacle.index].state = GOING
+		end
 
 		go.set(self.pivot_ids[tentacle_moved] .. "#sprite", "tint.w", 0)
 		go.animate(self.pivot_ids[tentacle_moved], "position", go.PLAYBACK_ONCE_FORWARD,
@@ -123,12 +126,21 @@ local function move_pivots_smoothly(self, hits, tentacle_moved)
 			self.tentacle_timeout, 0, function(self, url, property)
 				self.animations[tentacle_moved] = true
 
+				-- local chosen_tentacle = find_tentacle(self)
+				-- if chosen_tentacle then
+				-- 	chosen_tentacle.pivot_index = tentacle_moved
+				-- 	table.insert(self.active_tentacles, tentacle_moved, chosen_tentacle)
+				-- if chosen_tentacle then
+					self.tentacles[chosen_tentacle.index].prev_state = self.tentacles[chosen_tentacle.index].state
+					self.tentacles[chosen_tentacle.index].state = ATTACHED
+					go.set(self.pivot_ids[tentacle_moved] .. "#sprite", "tint.w", 1)
 
-				self.moved_tentacles = self.moved_tentacles + 1
+					self.moved_tentacles = self.moved_tentacles + 1
 
-				if self.moved_tentacles > #self.pivot_ids then
-					self.moved_tentacles = 1
-				end
+					if self.moved_tentacles > #self.pivot_ids then
+						self.moved_tentacles = 1
+					end
+				-- end
 			end)
 	end
 end
@@ -164,11 +176,11 @@ function init(self)
 		go.set(pivot_id .. "#sprite", "tint.w", 0)
 	end
 
-	-- for i = 1, 6, 1 do
-	-- 	local tentacle_id = "tentacle_" .. tostring(i) .. "#tentacle"
-	-- 	table.insert(self.tentacles, { id = tentacle_id, state = IDLE, prev_state = IDLE, index = i, pivot_index = nil })
-	-- 	go.set(tentacle_id, "index", i)
-	-- end
+	for i = 1, 6, 1 do
+		local tentacle_id = "tentacle_" .. tostring(i) .. "#tentacle"
+		table.insert(self.tentacles, { id = tentacle_id, state = IDLE, prev_state = IDLE, index = i, pivot_index = nil })
+		go.set(tentacle_id, "index", i)
+	end
 
 	self.active_tentacles = {}
 
@@ -249,32 +261,22 @@ function update(self, dt)
 	-- Get player position once for all tentacles
 	local player_pos = go.get_position()
 
-	for index, value in ipairs(self.active_tentacles) do
-		local pivot_pos = go.get_position(self.pivot_ids[value.pivot_index])
-		if pivot_pos then
-			go.set(value.id, "target_pos", pivot_pos)
-			go.set(value.id, "owner_pos", player_pos)
-		else
-			go.set(value.id, "owner_pos", player_pos)
-		end
-	end
-
 	-- Update each tentacle based on its state
-	-- for index, tentacle in ipairs(self.tentacles) do
-	-- 	local tentacle_url = tentacle.id
-	-- 	local tentacle_state = tentacle.state
-	-- 	local tentacle_index = tentacle.index
-	-- 	if tentacle_state == IDLE or tentacle_state == RETURNING then
-	-- 		go.set(tentacle_url, "target_pos", player_pos)
-	-- 		go.set(tentacle_url, "owner_pos", player_pos)
-	-- 	elseif tentacle_state == ATTACHED or tentacle_state == GOING then
-	-- 		local pivot_pos = go.get_position(self.pivot_ids[tentacle.pivot_index])
-	-- 		go.set(tentacle_url, "target_pos", pivot_pos)
-	-- 		go.set(tentacle_url, "owner_pos", player_pos)
-	-- 	end
+	for index, tentacle in ipairs(self.tentacles) do
+		local tentacle_url = tentacle.id
+		local tentacle_state = tentacle.state
+		local tentacle_index = tentacle.index
+		if tentacle_state == IDLE or tentacle_state == RETURNING then
+			go.set(tentacle_url, "target_pos", player_pos)
+			go.set(tentacle_url, "owner_pos", player_pos)
+		elseif tentacle_state == ATTACHED or tentacle_state == GOING then
+			local pivot_pos = go.get_position(self.pivot_ids[tentacle.pivot_index])
+			go.set(tentacle_url, "target_pos", pivot_pos)
+			go.set(tentacle_url, "owner_pos", player_pos)
+		end
 
-	-- 	go.set(tentacle_url, "state", tentacle_state)
-	-- end
+		go.set(tentacle_url, "state", tentacle_state)
+	end
 
 
 	-- Debugger set labels
@@ -283,9 +285,9 @@ function update(self, dt)
 		for index, value in ipairs(self.tentacles) do
 			text = text .. [[|
 			]] ..
-				value.id ..
-				" state: " ..
-				value.state .. " prev_state: " .. value.prev_state .. " pivot_index: " .. tostring(value.pivot_index)
+			value.id ..
+			" state: " ..
+			value.state .. " prev_state: " .. value.prev_state .. " pivot_index: " .. tostring(value.pivot_index)
 		end
 		label.set_text("debugger#label", text)
 

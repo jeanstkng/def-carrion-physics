@@ -170,7 +170,7 @@ local function reset_camera_world(state)
 end
 
 function init(self)
-    self.predicates = create_predicates("tile", "sprite", "gui", "particle", "model", "debug_text", "splat")
+    self.predicates = create_predicates("tile", "sprite", "gui", "particle", "model", "debug_text", "splat", "mask", "masked")
 
     -- default is stretch projection. copy from builtins and change for different projection
     -- or send a message to the render script to change projection:
@@ -244,6 +244,31 @@ function update(self)
     
     -- Draw splats only where tiles exist
     render.draw(predicates.splat, draw_options_world)
+    
+    -- Clear stencil buffer before mask/masked pass to separate from tile/splat
+    render.set_stencil_mask(0xFF)
+    render.clear({[graphics.BUFFER_TYPE_STENCIL_BIT] = 0})
+    
+    -- STENCIL RENDERING: Use mask predicate to mask masked predicate
+    -- Configure for writing mask to stencil buffer
+    render.set_stencil_func(graphics.COMPARE_FUNC_ALWAYS, 1, 0xFF)
+    render.set_stencil_op(graphics.STENCIL_OP_KEEP, graphics.STENCIL_OP_KEEP, graphics.STENCIL_OP_REPLACE)
+    
+    -- Disable color writes - mask only writes to stencil, not visible on screen
+    render.set_color_mask(false, false, false, false)
+    
+    -- Draw mask (only to stencil buffer, invisible)
+    render.draw(predicates.mask, draw_options_world)
+    
+    -- Re-enable color writes for masked and subsequent draws
+    render.set_color_mask(true, true, true, true)
+    
+    -- Now configure stencil to only draw where mask was (stencil == 1)
+    render.set_stencil_mask(0x00)
+    render.set_stencil_func(graphics.COMPARE_FUNC_EQUAL, 1, 0xFF)
+    
+    -- Draw masked only where mask exists
+    render.draw(predicates.masked, draw_options_world)
     
     -- Disable stencil test for remaining draws
     render.disable_state(graphics.STATE_STENCIL_TEST)

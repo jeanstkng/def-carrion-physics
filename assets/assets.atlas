@@ -10,4 +10,7 @@ images {
 images {
   image: "/assets/blood_splat.png"
 }
+images {
+  image: "/assets/pixel.png"
+}
 extrude_borders: 2
