@@ -87,6 +87,7 @@ local function drop_tentacle(self, pivot_index, player_pos)
 		if value.pivot_index == pivot_index then
 			value.pivot_index = nil
 			go.animate(value.id, "target_pos", go.PLAYBACK_ONCE_FORWARD, player_pos, go.EASING_LINEAR, 0.35)
+			go.set(value.id, "active_index", index)
 			msg.post(value.id, "retract")
 			break
 		end
@@ -410,6 +411,8 @@ function on_message(self, message_id, message, sender)
 			self.tentacles[reached_index].pivot_index = nil
 			go.set(self.tentacles[reached_index].id, "use_speed", false)
 		end
+	elseif message_id == hash("tentacle_retracted") then
+		table.remove(self.active_tentacles, message.active_index) -- remove it immediately
 	end
 end
 

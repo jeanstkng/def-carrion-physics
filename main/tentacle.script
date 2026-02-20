@@ -1,4 +1,3 @@
--- tentacle.go script
 local fabrik = require("main.fabrik")
 
 local SET_TARGET = hash("set_target")
@@ -6,142 +5,216 @@ local RETRACT = hash("retract")
 
 local SEGMENT_COUNT = 50
 local SEGMENT_LENGTH = 30
-local DAMPING = 0.5           -- lower = more lag/sway (0.05 very sluggish, 0.3 snappy)
-local WAVE_AMPLITUDE = 75     -- side-to-side sway strength
-local WAVE_FREQUENCY = 2      -- oscillation speed
-local WAVE_PHASE_OFFSET = 0.2 -- phase shift per segment (creates the wave travel)
+local DAMPING = 0.5
+local WAVE_AMPLITUDE = 75
+local WAVE_FREQUENCY = 2
+local WAVE_PHASE_OFFSET = 0.2
+local TENTACLE_WIDTH = 20
+local TENTACLE_TIP_WIDTH = 20
 
 go.property("target_pos", vmath.vector3())
 go.property("owner_pos", vmath.vector3())
+go.property("active_index", 1)
+go.property("dynamic_length", true)
 
 function init(self)
-	self.chain_ids = {}
 	self.segments = {}
-	self.velocities = {}
 	self.lengths = {}
 	self.time = 0
 
 	local base = go.get_world_position()
-
 	for i = 1, SEGMENT_COUNT do
-		local spawn_pos = vmath.vector3(base.x, base.y - (i * SEGMENT_LENGTH), 0)
-
-		local id = factory.create(
-			"#chain_factory",
-			spawn_pos,
-			vmath.quat(), -- identity rotation, IK will control it
-			{},
-			1
-		)
-
-		table.insert(self.chain_ids, id)
-		table.insert(self.segments, spawn_pos)
-		table.insert(self.velocities, vmath.vector3(0, 0, 0))
-		table.insert(self.lengths, SEGMENT_LENGTH)
+		self.segments[i] = vmath.vector3(base.x, base.y - (i * SEGMENT_LENGTH), 0)
+		self.lengths[i] = SEGMENT_LENGTH
 	end
 
 	self.target_pos = vmath.vector3(self.segments[SEGMENT_COUNT])
 	self.smooth_target = vmath.vector3(self.target_pos)
-	self.active_segments = SEGMENT_COUNT
 	self.retracting = false
-	self.retract_speed = 300
+	self.retract_speed = 900
+
+	-- Create vertex buffer: 2 verts per segment for triangle strip
+	local vert_count = 2 * SEGMENT_COUNT
+	self.buf = buffer.create(vert_count, {
+		{ name = hash("position"),  type = buffer.VALUE_TYPE_FLOAT32, count = 3 },
+		{ name = hash("texcoord0"), type = buffer.VALUE_TYPE_FLOAT32, count = 2 },
+	})
+	self.pos_stream = buffer.get_stream(self.buf, hash("position"))
+	self.uv_stream = buffer.get_stream(self.buf, hash("texcoord0"))
+
+	-- Each tentacle needs a unique buffer resource path
+	local unique_path = "/tentacle_" .. tostring(go.get_id()) .. ".bufferc"
+	self.buf_resource = resource.create_buffer(unique_path, { buffer = self.buf, transfer_ownership = false })
+	go.set("#mesh", "vertices", self.buf_resource)
 end
 
 function update(self, dt)
 	self.time = self.time + dt
-	-- local origin = go.get_world_position()
 	local origin = self.owner_pos
 
+	-- Adjust segment lengths based on distance if enabled
+	if self.dynamic_length then
+		local dist = vmath.length(self.target_pos - origin)
+		local new_seg_length = math.max(5, dist / SEGMENT_COUNT)
+		for i = 1, SEGMENT_COUNT do
+			self.lengths[i] = new_seg_length
+		end
+	else
+		for i = 1, SEGMENT_COUNT do
+			self.lengths[i] = SEGMENT_LENGTH
+		end
+	end
 	if self.retracting then
-		-- local origin = go.get_world_position()
-		local origin = self.owner_pos
-
-		-- Advance progress at fixed rate regardless of player movement
 		local total_time = vmath.length(self.retract_start_pos - origin) / self.retract_speed
 		self.retract_progress = self.retract_progress + (dt / total_time)
 		self.retract_progress = math.min(self.retract_progress, 1.0)
 
-		-- Target moves from start pos toward current player pos
 		self.target_pos = vmath.lerp(self.retract_progress, self.retract_start_pos, origin)
-
 		self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target_pos)
-		fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 8)
-
-		local segments_to_show = math.max(1, math.ceil((1.0 - self.retract_progress) * SEGMENT_COUNT))
-		for i = 1, SEGMENT_COUNT do
-			local action = i <= segments_to_show and "enable" or "disable"
-			msg.post(msg.url(nil, self.chain_ids[i], "sprite"), action, {})
-		end
+		fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 3)
 
 		if self.retract_progress >= 1.0 then
 			finish_retract(self)
+			return
 		end
 	else
 		self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target_pos)
-		fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 8)
+		fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 3)
 	end
 
 	apply_wave(self, dt)
-	update_visuals(self)
-end
-
-function start_retract(self)
-	self.retracting = true
-	self.smooth_target = vmath.vector3(self.segments[SEGMENT_COUNT])
-	-- Store the fixed retraction path
-	self.retract_start_pos = vmath.vector3(self.target_pos)
-	self.retract_progress = 0 -- 0 to 1
+	update_mesh(self)
 end
 
 function apply_wave(self, dt)
 	for i = 2, SEGMENT_COUNT do
-		-- Perpendicular direction to the segment
 		local seg_dir
+		local valid = true
+
 		if i < SEGMENT_COUNT then
-			seg_dir = vmath.normalize(self.segments[i + 1] - self.segments[i - 1])
+			local diff = self.segments[i + 1] - self.segments[i - 1]
+			if vmath.length(diff) < 0.001 then
+				valid = false
+			else
+				seg_dir = vmath.normalize(diff)
+			end
 		else
-			seg_dir = vmath.normalize(self.segments[i] - self.segments[i - 1])
+			local diff = self.segments[i] - self.segments[i - 1]
+			if vmath.length(diff) < 0.001 then
+				valid = false
+			else
+				seg_dir = vmath.normalize(diff)
+			end
 		end
 
-		-- Perpendicular = rotate direction 90 degrees
-		local perp = vmath.vector3(-seg_dir.y, seg_dir.x, 0)
-
-		-- Wave increases in amplitude toward the tip (index weight)
-		local tip_weight = (i / SEGMENT_COUNT) ^ 1.8
-		local wave = math.sin(self.time * WAVE_FREQUENCY + i * WAVE_PHASE_OFFSET)
-
-		self.segments[i] = self.segments[i] + perp * (wave * WAVE_AMPLITUDE * tip_weight * 0.016)
+		if valid then
+			local perp = vmath.vector3(-seg_dir.y, seg_dir.x, 0)
+			local tip_weight = (i / SEGMENT_COUNT) ^ 1.8
+			local wave = math.sin(self.time * WAVE_FREQUENCY + i * WAVE_PHASE_OFFSET)
+			self.segments[i] = self.segments[i] + perp * (wave * WAVE_AMPLITUDE * tip_weight * 0.016)
+		end
 	end
+end
+
+function update_mesh(self)
+	local pos = self.pos_stream
+	local uvs = self.uv_stream
+	local origin = go.get_world_position()
+
+	-- During retraction, reduce visible segments from tip toward root
+	local visible = SEGMENT_COUNT
+	if self.retracting then
+		visible = math.max(1, math.ceil((1.0 - self.retract_progress) * SEGMENT_COUNT))
+	end
+
+	for i = 1, SEGMENT_COUNT do
+		if i > visible then
+			-- Collapse invisible segments to a single point (root), so they don't stick out
+			local li    = ((i - 1) * 2) * 3 + 1
+			local ri    = ((i - 1) * 2 + 1) * 3 + 1
+			local root  = self.segments[visible] - origin -- last visible segment, not segments[1]
+			pos[li]     = root.x
+			pos[li + 1] = root.y
+			pos[li + 2] = 0
+			pos[ri]     = root.x
+			pos[ri + 1] = root.y
+			pos[ri + 2] = 0
+		else
+			local seg = self.segments[i]
+			if not seg or seg.x ~= seg.x then -- nil or NaN check
+				break
+			end
+
+			local dir
+			if i < visible then
+				local diff = self.segments[i + 1] - self.segments[i]
+				if vmath.length(diff) > 0.001 then
+					dir = vmath.normalize(diff)
+				else
+					dir = vmath.vector3(0, 1, 0)
+				end
+			elseif i > 1 then -- only look backward if there's a previous segment
+				local diff = self.segments[i] - self.segments[i - 1]
+				if vmath.length(diff) > 0.001 then
+					dir = vmath.normalize(diff)
+				else
+					dir = vmath.vector3(0, 1, 0)
+				end
+			else
+				dir = vmath.vector3(0, 1, 0) -- fallback when visible = 1
+			end
+
+			local perp = vmath.vector3(-dir.y, dir.x, 0)
+			if perp.x ~= perp.x or perp.y ~= perp.y then -- NaN check
+				perp = vmath.vector3(1, 0, 0)
+			end
+			local t = visible > 1 and (i - 1) / (visible - 1) or 0
+			local half_w   = TENTACLE_WIDTH + (TENTACLE_TIP_WIDTH - TENTACLE_WIDTH) * t
+
+			local left     = (seg + perp * half_w) - origin
+			local right    = (seg - perp * half_w) - origin
+
+			local li       = ((i - 1) * 2) * 3 + 1
+			local ri       = ((i - 1) * 2 + 1) * 3 + 1
+			pos[li]        = left.x
+			pos[li + 1]    = left.y
+			pos[li + 2]    = 0
+			pos[ri]        = right.x
+			pos[ri + 1]    = right.y
+			pos[ri + 2]    = 0
+
+			local uv_li    = ((i - 1) * 2) * 2 + 1
+			local uv_ri    = ((i - 1) * 2 + 1) * 2 + 1
+			uvs[uv_li]     = 0
+			uvs[uv_li + 1] = t
+			uvs[uv_ri]     = 1
+			uvs[uv_ri + 1] = t
+		end
+	end
+
+	buffer.set_metadata(self.buf, hash("AABB"), { -1000, -1000, -1, 1000, 1000, 1 }, buffer.VALUE_TYPE_FLOAT32)
+	resource.set_buffer(self.buf_resource, self.buf)
 end
 
 function finish_retract(self)
 	self.retracting = false
-	-- Delete all spawned links
-	for _, id in ipairs(self.chain_ids) do
-		go.delete(id)
-	end
-	self.chain_ids = {}
-	-- Tell parent the tentacle is gone
-	-- msg.post("..", "tentacle_retracted")
-end
-
-function update_visuals(self)
+	local origin = self.owner_pos
 	for i = 1, SEGMENT_COUNT do
-		local id = self.chain_ids[i]
-		if id then
-			go.set_position(self.segments[i], id)
-
-			-- Rotate sprite to face next segment
-			local next_pos = self.segments[i + 1] or self.segments[i]
-			local prev_pos = self.segments[i - 1] or self.segments[i]
-			local dir = vmath.normalize(next_pos - prev_pos)
-			local angle = math.atan2(dir.y, dir.x) - math.pi * 0.5 -- offset if sprite points up
-			go.set_rotation(vmath.quat_rotation_z(angle), id)
-		end
+		self.segments[i] = vmath.vector3(origin)
+		self.lengths[i] = SEGMENT_LENGTH
 	end
+	self.target_pos = vmath.vector3(origin)
+	self.smooth_target = vmath.vector3(origin)
+	msg.post("#mesh", "disable")
+	msg.post("/player#player", "tentacle_free", { id = msg.url() })
 end
 
--- Call this to move the tentacle tip toward something
+function start_retract(self)
+	self.retracting = true
+	self.retract_start_pos = vmath.vector3(self.target_pos)
+	self.retract_progress = 0
+end
+
 function set_target(self, world_pos)
 	self.target_pos = vmath.vector3(world_pos)
 end
@@ -151,20 +224,8 @@ function on_message(self, message_id, message)
 		set_target(self, message.position)
 	elseif message_id == RETRACT then
 		start_retract(self)
-	end
-end
-
-function on_input(self, action_id, action)
-	if not action_id then
-		-- Convert screen to world if needed
-		-- if not self.retracting then
-		-- 	self.target_pos = vmath.vector3(action.x, action.y, 0)
-		-- end
-	elseif action_id == hash("touch") and action.pressed then
-		print("yyyy")
-		-- start_retract(self)
-	elseif action_id == hash("secondary_touch") and action.pressed then
-		print("oooo")
-		-- go.animate(".", "position", go.PLAYBACK_ONCE_FORWARD, vmath.vector3(action.x, action.y, 0), go.EASING_LINEAR, 0.5)
+		self.dynamic_length = false
+	elseif message_id == hash("enable_mesh") then
+		msg.post("#mesh", "enable")
 	end
 end

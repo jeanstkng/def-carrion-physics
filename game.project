@@ -26,3 +26,6 @@ title = physics_carrion
 [sprite]
 max_count = 5000
 
+[collection]
+max_instances = 10240
+

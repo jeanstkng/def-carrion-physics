@@ -8,25 +8,32 @@ local M = {}
 function M.solve(segments, origin, target, lengths, iterations)
     iterations = iterations or 10
     local n = #segments
-    
+
     -- Forward pass (tip -> root)
     local function forward_pass()
         segments[n] = vmath.vector3(target)
         for i = n - 1, 1, -1 do
-            local dir = vmath.normalize(segments[i] - segments[i + 1])
+            local diff = segments[i] - segments[i + 1]
+            if vmath.length(diff) < 0.001 then
+                diff = vmath.vector3(0, 1, 0) -- fallback direction
+            end
+            local dir = vmath.normalize(diff)
             segments[i] = segments[i + 1] + dir * lengths[i]
         end
     end
-    
     -- Backward pass (root -> tip)
     local function backward_pass()
         segments[1] = vmath.vector3(origin)
         for i = 2, n do
-            local dir = vmath.normalize(segments[i] - segments[i - 1])
+            local diff = segments[i] - segments[i - 1]
+            if vmath.length(diff) < 0.001 then
+                diff = vmath.vector3(0, 1, 0)
+            end
+            local dir = vmath.normalize(diff)
             segments[i] = segments[i - 1] + dir * lengths[i - 1]
         end
     end
-    
+
     for _ = 1, iterations do
         forward_pass()
         backward_pass()

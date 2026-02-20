@@ -3,8 +3,10 @@ components {
   component: "/main/tentacle.script"
 }
 embedded_components {
-  id: "chain_factory"
-  type: "factory"
-  data: "prototype: \"/main/test/chain_copy.go\"\n"
+  id: "mesh"
+  type: "mesh"
+  data: "material: \"/builtins/materials/model.material\"\n"
+  "vertices: \"/main/tentacle.buffer\"\n"
+  "primitive_type: PRIMITIVE_TRIANGLE_STRIP\n"
   ""
 }
