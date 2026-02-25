@@ -1,30 +1,40 @@
 go.property("target_pos", vmath.vector3())
 go.property("owner_pos", vmath.vector3())
-go.property("index", 1)
-go.property("use_speed", false) -- If true, uses speed-based movement. If false, follows in realtime
-go.property("speed", 10000)     -- Speed in units per second (only used if use_speed is true)
-go.property("state", 1)
+go.property("is_active", false)
+go.property("use_speed", true)    -- If true, uses speed-based movement. If false, follows in realtime
+go.property("speed", 12000)       -- Speed in units per second (only used if use_speed is true)
+go.property("max_distance", 1000) -- Maximum reach distance from owner position (in pixels)
 
 local REACHED = hash("reached")
 
 function init(self)
 	self.texture_width = 96
-	self.masked_sprite_width = 1920  -- Actual width of the masked sprite
+	self.masked_sprite_width = 1920                   -- Actual width of the masked sprite
 	self.current_target = vmath.vector3(self.target_pos) -- Interpolated target position
 	self.was_using_speed = false                      -- Track previous state to initialize current_target properly
-	self.masked_url = "masked" .. self.index
+	self.masked_url = "masked"
 	go.set_scale(vmath.vector3(0.1, 0.1, 0.1), self.masked_url)
 end
 
 function update(self, dt)
 	local player_pos = self.owner_pos
 	local target = self.target_pos
+
+	-- Clamp target position to maximum distance from owner
+	local diff_to_target = target - player_pos
+	local distance_to_target = vmath.length(diff_to_target)
+
+	if distance_to_target > self.max_distance then
+		local direction = vmath.normalize(diff_to_target)
+		target = player_pos + direction * self.max_distance
+	end
+
 	local current_target = nil
 
-	if self.state == 1 then
-		go.set_scale(vmath.vector3(0.01, 0.01, 0.01), self.masked_url)
-	else
+	if self.is_active then
 		go.set_scale(vmath.vector3(1, 1, 1), self.masked_url)
+	else
+		go.set_scale(vmath.vector3(0.1, 0.1, 0.1), self.masked_url)
 	end
 
 	if self.use_speed then
@@ -65,9 +75,14 @@ function update(self, dt)
 	local diff = current_target - player_pos
 	local distance = vmath.length(diff)
 
+	if self.is_active then
+		go.set_position(self.target_pos, "hand_touch")
+	end
+
 	-- Evitamos errores si la distancia es 0
 	if distance < 1 then
-		msg.post("player#player", REACHED, { index = self.index })
+		msg.post("player#player", REACHED)
+
 
 		go.set_position(player_pos)
 		go.set_scale(vmath.vector3(0.1, 0.1, 1))
@@ -97,7 +112,7 @@ function update(self, dt)
 	local half_width_offset = self.masked_sprite_width / 2
 	local masked_position = player_pos + vmath.rotate(rotation, vmath.vector3(half_width_offset, 0, 0))
 	masked_position.z = 0
-	
+
 	go.set_position(masked_position, self.masked_url)
 	go.set_rotation(rotation, self.masked_url)
 end

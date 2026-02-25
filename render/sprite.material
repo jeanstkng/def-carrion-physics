@@ -1,6 +1,5 @@
 name: "sprite"
 tags: "sprite"
-tags: "tile"
 vertex_program: "/builtins/materials/sprite.vp"
 fragment_program: "/render/sprite.fp"
 vertex_constants {

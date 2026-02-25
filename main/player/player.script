@@ -31,7 +31,7 @@ local ATTACHED = 4
 local MAX_SPLATS = 100
 
 go.property("speed", 5000)
-go.property("far_distance", 1800)
+go.property("far_distance", 3000)
 
 local function draw_line(from, to, color)
 	if not DEBUG then
@@ -85,10 +85,14 @@ end
 local function drop_tentacle(self, pivot_index, player_pos)
 	for index, value in ipairs(self.active_tentacles) do
 		if value.pivot_index == pivot_index then
+			print("pivot pos: ", go.get_position(self.pivot_ids[value.pivot_index]))
 			value.pivot_index = nil
-			go.animate(value.id, "target_pos", go.PLAYBACK_ONCE_FORWARD, player_pos, go.EASING_LINEAR, 0.35)
+			value.is_available = false
+			print("player ->", player_pos, " last ->", value.last_target_pos, " le index ->", index)
+			-- local target_pos = get_position_from_target_towards_pos(player_pos, value.last_target_pos, 3)
+			-- go.animate(value.id, "target_pos", go.PLAYBACK_ONCE_FORWARD, target_pos, go.EASING_LINEAR, 0.35)
 			go.set(value.id, "active_index", index)
-			msg.post(value.id, "retract")
+			msg.post(value.id, "set_idle")
 			break
 		end
 	end
@@ -99,31 +103,46 @@ local function move_pivots_smoothly(self, hits, tentacle_moved)
 	if self.animations[tentacle_moved] then -- Verify if animation is done
 		self.animations[tentacle_moved] = false
 		local player_pos = go.get_position()
-		go.set_position(player_pos, self.pivot_ids[tentacle_moved])
 
-		local id = factory.create(
-			"/tentacles#factory",
-			player_pos,
-			vmath.quat(), -- identity rotation, IK will control it
-			{},
-			1
-		)
 
+		-- local id = factory.create(
+		-- 	"/tentacles#factory",
+		-- 	player_pos,
+		-- 	vmath.quat(), -- identity rotation, IK will control it
+		-- 	{},
+		-- 	1
+		-- )
 		drop_tentacle(self, tentacle_moved, player_pos)
 
-		table.insert(self.active_tentacles, {
-			id = msg.url(nil, id, "tentacle")
-			,
-			pivot_index = tentacle_moved
-		})
+		-- find tentacle with nil pivot_index
+		local id = ""
+		local idx = 1
+		for index, value in ipairs(self.active_tentacles) do
+			if value.pivot_index == nil and value.is_available then
+				id = value.id
+				idx = index
+				break
+			end
+		end
+
+		go.set(id, "owner_pos", player_pos)
+
+		self.active_tentacles[idx].pivot_index = tentacle_moved
+
+		go.set_position(player_pos, self.pivot_ids[tentacle_moved])
+
+		msg.post(id, "set_target", { position = player_pos })
 
 		go.set(self.pivot_ids[tentacle_moved] .. "#sprite", "tint.w", 0)
+
 		go.animate(self.pivot_ids[tentacle_moved], "position", go.PLAYBACK_ONCE_FORWARD,
 			hits[tentacle_moved].position,
 			go.EASING_LINEAR,
 			self.tentacle_timeout, 0, function(self, url, property)
 				self.animations[tentacle_moved] = true
 
+				go.animate(self.pivot_ids[tentacle_moved] .. "#sprite", "tint.w", go.PLAYBACK_ONCE_FORWARD, 1,
+					go.EASING_INOUTEXPO, 0.15)
 
 				self.moved_tentacles = self.moved_tentacles + 1
 
@@ -144,7 +163,6 @@ function init(self)
 	-- Setting up ids
 	self.pivots = {} -- Game Objects (collision objects)
 	self.pivot_ids = {} -- Pivot Game Object IDs
-	self.tentacles = {} -- Tentacle Scripts
 	self.joint_ids = {}
 	self.joints_enabled = {}
 	self.debug_labels = {}
@@ -165,13 +183,27 @@ function init(self)
 		go.set(pivot_id .. "#sprite", "tint.w", 0)
 	end
 
-	-- for i = 1, 6, 1 do
-	-- 	local tentacle_id = "tentacle_" .. tostring(i) .. "#tentacle"
-	-- 	table.insert(self.tentacles, { id = tentacle_id, state = IDLE, prev_state = IDLE, index = i, pivot_index = nil })
-	-- 	go.set(tentacle_id, "index", i)
-	-- end
-
 	self.active_tentacles = {}
+	self.player_pos = go.get_position()
+	for i = 1, 9, 1 do
+		local id = factory.create(
+			"/tentacles#factory",
+			self.player_pos,
+			vmath.quat(), -- identity rotation, IK will control it
+			{},
+			1
+		)
+		local tentacle_id = msg.url(nil, id, "tentacle")
+
+		table.insert(self.active_tentacles,
+			{ id = tentacle_id, index = i, pivot_index = nil, is_available = true })
+		go.set(tentacle_id, "active_index", i)
+	end
+
+	self.hand_id = "/hand#hand"
+
+	go.set(self.hand_id, "owner_pos", self.player_pos)
+	go.set(self.hand_id, "target_pos", self.player_pos)
 
 	self.weight_spring = "player#collisionobject"
 
@@ -193,21 +225,21 @@ function init(self)
 
 	self.action_pos = vmath.vector3()
 	self.last_screen_pos = nil -- stores the last mouse screen position for per-frame recalculation
+	self.mouse_world = vmath.vector3()
 end
 
 local function recalculate_to(self)
 	if not self.last_screen_pos then
 		return
 	end
-	local mouse_world = camera.screen_to_world(self.last_screen_pos, CAMERA_ID)
-	local player_pos = go.get_position()
+	self.mouse_world = camera.screen_to_world(self.last_screen_pos, CAMERA_ID)
 
-	local dx = mouse_world.x - player_pos.x
-	local dy = mouse_world.y - player_pos.y
+	local dx = self.mouse_world.x - self.player_pos.x
+	local dy = self.mouse_world.y - self.player_pos.y
 	local angle = math.atan2(dy, dx)
 
 	local direction = vmath.vector3(math.cos(angle), math.sin(angle), 0)
-	self.to = player_pos + direction * self.far_distance
+	self.to = self.player_pos + direction * self.far_distance
 end
 
 function update(self, dt)
@@ -248,48 +280,28 @@ function update(self, dt)
 	self.rear_hits = cast_cone(from, direction, max_distance, { TILE }, REAR_CONE_ANGLE, REAR_NUM_RAYS)
 
 	-- Get player position once for all tentacles
-	local player_pos = go.get_position()
+	self.player_pos = go.get_position()
 
 	for index, value in ipairs(self.active_tentacles) do
 		local pivot_pos = go.get_position(self.pivot_ids[value.pivot_index])
-		if pivot_pos then
+		if value.pivot_index then
 			go.set(value.id, "target_pos", pivot_pos)
-			go.set(value.id, "owner_pos", player_pos)
+			go.set(value.id, "owner_pos", self.player_pos)
 		else
-			go.set(value.id, "owner_pos", player_pos)
+			go.set(value.id, "owner_pos", self.player_pos)
 		end
 	end
 
-	-- Update each tentacle based on its state
-	-- for index, tentacle in ipairs(self.tentacles) do
-	-- 	local tentacle_url = tentacle.id
-	-- 	local tentacle_state = tentacle.state
-	-- 	local tentacle_index = tentacle.index
-	-- 	if tentacle_state == IDLE or tentacle_state == RETURNING then
-	-- 		go.set(tentacle_url, "target_pos", player_pos)
-	-- 		go.set(tentacle_url, "owner_pos", player_pos)
-	-- 	elseif tentacle_state == ATTACHED or tentacle_state == GOING then
-	-- 		local pivot_pos = go.get_position(self.pivot_ids[tentacle.pivot_index])
-	-- 		go.set(tentacle_url, "target_pos", pivot_pos)
-	-- 		go.set(tentacle_url, "owner_pos", player_pos)
-	-- 	end
-
-	-- 	go.set(tentacle_url, "state", tentacle_state)
-	-- end
+	go.set(self.hand_id, "owner_pos", self.player_pos)
+	if self.secondary_mouse_pressed then
+		go.set(self.hand_id, "target_pos", self.mouse_world)
+	else
+		go.set(self.hand_id, "target_pos", self.player_pos)
+	end
 
 
 	-- Debugger set labels
 	if DEBUG then
-		local text = ""
-		for index, value in ipairs(self.tentacles) do
-			text = text .. [[|
-			]] ..
-				value.id ..
-				" state: " ..
-				value.state .. " prev_state: " .. value.prev_state .. " pivot_index: " .. tostring(value.pivot_index)
-		end
-		label.set_text("debugger#label", text)
-
 		for index, value in ipairs(self.debug_labels) do
 			label.set_text(value,
 				tostring(self.joints_enabled[index]) .. "-" .. tostring(index) .. "-" .. tostring(self.animations[index]))
@@ -316,7 +328,6 @@ function fixed_update(self, dt)
 			previous_distance = distance
 		end
 		if distance > self.far_distance then
-			pprint("Achinga")
 			toggle_joint(self, index, false)
 			-- Release the tentacle assigned to this pivot
 		end
@@ -402,17 +413,17 @@ function on_message(self, message_id, message, sender)
 				end)
 		end
 	elseif message_id == REACHED then
-		local reached_index = message.index
-
-		local actual_state = self.tentacles[reached_index].state
-		if actual_state == RETURNING then
-			self.tentacles[reached_index].prev_state = actual_state
-			self.tentacles[reached_index].state = IDLE
-			self.tentacles[reached_index].pivot_index = nil
-			go.set(self.tentacles[reached_index].id, "use_speed", false)
-		end
-	elseif message_id == hash("tentacle_retracted") then
-		table.remove(self.active_tentacles, message.active_index) -- remove it immediately
+		-- local reached_index = message.index
+		pprint("Reached index")
+		-- local actual_state = self.tentacles[reached_index].state
+		-- if actual_state == RETURNING then
+		-- 	self.tentacles[reached_index].prev_state = actual_state
+		-- 	self.tentacles[reached_index].state = IDLE
+		-- 	self.tentacles[reached_index].pivot_index = nil
+		-- 	go.set(self.tentacles[reached_index].id, "use_speed", false)
+		-- end
+	elseif message_id == hash("free_tentacle") then
+		self.active_tentacles[message.active_index].is_available = true
 	end
 end
 
@@ -421,6 +432,16 @@ function on_input(self, action_id, action)
 		-- Store screen position so we can recalculate self.to every frame
 		self.last_screen_pos = vmath.vector3(action.screen_x, action.screen_y, 0)
 		recalculate_to(self)
+	elseif action_id == SECONDARY_TOUCH then
+		if action.pressed then
+			self.secondary_mouse_pressed = true
+			go.set(self.hand_id, "is_active", true)
+			msg.post("hand_touch#touch", "enable")
+		elseif action.released then
+			go.set(self.hand_id, "is_active", false)
+			self.secondary_mouse_pressed = false
+			msg.post("hand_touch#touch", "disable")
+		end
 	elseif action_id == TOUCH then
 		if action.pressed then
 			self.mouse_pressed = true

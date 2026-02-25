@@ -1,231 +1,345 @@
-local fabrik = require("main.fabrik")
+local fabrik             = require("main.fabrik")
 
-local SET_TARGET = hash("set_target")
-local RETRACT = hash("retract")
+local SET_TARGET         = hash("set_target")
+local RETRACT            = hash("retract")
 
-local SEGMENT_COUNT = 50
-local SEGMENT_LENGTH = 30
-local DAMPING = 0.5
-local WAVE_AMPLITUDE = 75
-local WAVE_FREQUENCY = 2
-local WAVE_PHASE_OFFSET = 0.2
-local TENTACLE_WIDTH = 20
-local TENTACLE_TIP_WIDTH = 20
+local SEGMENT_COUNT      = 50
+local SEGMENT_LENGTH     = 15
+local DAMPING            = 0.25 -- lower = snappier follow
+local TENTACLE_WIDTH     = 20
+local TENTACLE_TIP_WIDTH = 4
+
+-- Idle wave parameters (only applied when not attached to a target)
+local WAVE_AMPLITUDE     = 60
+local WAVE_FREQUENCY     = 1.8
+local WAVE_PHASE_OFFSET  = 0.22
+
+-- How many segments from the tip start fading to 0 alpha
+local FADE_START_FRAC    = 0.55 -- fade begins at 55% along length
+local FADE_END_FRAC      = 1.0
+
+-- Tentacle states
+local STATE_IDLE         = "idle"
+local STATE_ACTIVE       = "active" -- attached/in use as pivot
+local STATE_INACTIVE       = "inactive" -- attached/in use as pivot
+local STATE_RETRACT      = "retract"
 
 go.property("target_pos", vmath.vector3())
 go.property("owner_pos", vmath.vector3())
 go.property("active_index", 1)
-go.property("dynamic_length", true)
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- INIT
+-- ─────────────────────────────────────────────────────────────────────────────
 function init(self)
-	self.segments = {}
-	self.lengths = {}
-	self.time = 0
+	self.segments             = {}
+	self.lengths              = {}
+	self.time                 = 0
+	self.state                = STATE_INACTIVE
+	self.tint_alpha           = 0 -- controlled via go.set each frame
 
-	local base = go.get_world_position()
+	-- Initialize idle behavior parameters
+	local seg_len             = SEGMENT_LENGTH
+	self.idle_target_timer    = 0
+	self.idle_target_angle    = math.random() * math.pi * 2
+	self.idle_target_distance = (SEGMENT_COUNT * seg_len * 0.25) + math.random() * (SEGMENT_COUNT * seg_len * 0.25)
+
+	local base                = go.get_world_position()
 	for i = 1, SEGMENT_COUNT do
 		self.segments[i] = vmath.vector3(base.x, base.y - (i * SEGMENT_LENGTH), 0)
-		self.lengths[i] = SEGMENT_LENGTH
+		self.lengths[i]  = SEGMENT_LENGTH
 	end
 
-	self.target_pos = vmath.vector3(self.segments[SEGMENT_COUNT])
-	self.smooth_target = vmath.vector3(self.target_pos)
-	self.retracting = false
-	self.retract_speed = 900
+	self.target_pos        = vmath.vector3(self.segments[SEGMENT_COUNT])
+	self.smooth_target     = vmath.vector3(self.target_pos)
 
-	-- Create vertex buffer: 2 verts per segment for triangle strip
-	local vert_count = 2 * SEGMENT_COUNT
-	self.buf = buffer.create(vert_count, {
+	self.retract_speed     = 1200
+	self.retract_progress  = 0
+	self.retract_start_pos = vmath.vector3()
+
+	-- Vertex buffer: 2 verts per segment → triangle strip
+	local vert_count       = 2 * SEGMENT_COUNT
+	self.buf               = buffer.create(vert_count, {
 		{ name = hash("position"),  type = buffer.VALUE_TYPE_FLOAT32, count = 3 },
 		{ name = hash("texcoord0"), type = buffer.VALUE_TYPE_FLOAT32, count = 2 },
 	})
-	self.pos_stream = buffer.get_stream(self.buf, hash("position"))
-	self.uv_stream = buffer.get_stream(self.buf, hash("texcoord0"))
+	self.pos_stream        = buffer.get_stream(self.buf, hash("position"))
+	self.uv_stream         = buffer.get_stream(self.buf, hash("texcoord0"))
 
-	-- Each tentacle needs a unique buffer resource path
-	local unique_path = "/tentacle_" .. tostring(go.get_id()) .. ".bufferc"
-	self.buf_resource = resource.create_buffer(unique_path, { buffer = self.buf, transfer_ownership = false })
+	local unique_path      = "/tentacle_" .. tostring(go.get_id()) .. ".bufferc"
+	self.buf_resource      = resource.create_buffer(unique_path, { buffer = self.buf, transfer_ownership = false })
 	go.set("#mesh", "vertices", self.buf_resource)
+	go.set("#mesh", "tint", vmath.vector4(0, 0, 0, 0))
 end
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- UPDATE
+-- ─────────────────────────────────────────────────────────────────────────────
 function update(self, dt)
 	self.time = self.time + dt
 	local origin = self.owner_pos
 
-	-- Adjust segment lengths based on distance if enabled
-	if self.dynamic_length then
-		local dist = vmath.length(self.target_pos - origin)
-		local new_seg_length = math.max(5, dist / SEGMENT_COUNT)
-		for i = 1, SEGMENT_COUNT do
-			self.lengths[i] = new_seg_length
-		end
-	else
-		for i = 1, SEGMENT_COUNT do
-			self.lengths[i] = SEGMENT_LENGTH
-		end
-	end
-	if self.retracting then
-		local total_time = vmath.length(self.retract_start_pos - origin) / self.retract_speed
-		self.retract_progress = self.retract_progress + (dt / total_time)
-		self.retract_progress = math.min(self.retract_progress, 1.0)
+	-- if self.state == STATE_INACTIVE then
+	-- 	return
+	-- end
 
-		self.target_pos = vmath.lerp(self.retract_progress, self.retract_start_pos, origin)
-		self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target_pos)
-		fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 3)
-
-		if self.retract_progress >= 1.0 then
-			finish_retract(self)
-			return
-		end
-	else
-		self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target_pos)
-		fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 3)
+	if self.state == STATE_ACTIVE then
+		update_active(self, dt, origin)
+	elseif self.state == STATE_RETRACT then
+		update_retract(self, dt, origin)
+	elseif self.state == STATE_IDLE then -- IDLE
+		update_idle(self, dt, origin)
 	end
 
-	apply_wave(self, dt)
 	update_mesh(self)
 end
 
-function apply_wave(self, dt)
-	for i = 2, SEGMENT_COUNT do
-		local seg_dir
-		local valid = true
+-- ─────────────────────────────────────────────────────────────────────────────
+-- STATE: ACTIVE  (used as pivot – dead straight, no wave)
+-- ─────────────────────────────────────────────────────────────────────────────
+function update_active(self, dt, origin)
+	-- Distribute segment lengths evenly across the real distance
+	local dist = vmath.length(self.target_pos - origin)
+	local seg_len = math.max(2, dist / SEGMENT_COUNT)
+	for i = 1, SEGMENT_COUNT do self.lengths[i] = seg_len end
 
-		if i < SEGMENT_COUNT then
-			local diff = self.segments[i + 1] - self.segments[i - 1]
-			if vmath.length(diff) < 0.001 then
-				valid = false
-			else
-				seg_dir = vmath.normalize(diff)
-			end
-		else
-			local diff = self.segments[i] - self.segments[i - 1]
-			if vmath.length(diff) < 0.001 then
-				valid = false
-			else
-				seg_dir = vmath.normalize(diff)
-			end
-		end
+	-- Smooth follow but stay straight
+	self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target_pos)
 
-		if valid then
-			local perp = vmath.vector3(-seg_dir.y, seg_dir.x, 0)
-			local tip_weight = (i / SEGMENT_COUNT) ^ 1.8
-			local wave = math.sin(self.time * WAVE_FREQUENCY + i * WAVE_PHASE_OFFSET)
-			self.segments[i] = self.segments[i] + perp * (wave * WAVE_AMPLITUDE * tip_weight * 0.016)
-		end
+	-- Build a perfectly straight chain from origin → smooth_target
+	-- FABRIK would work but straight interpolation is cleaner / no artifacts
+	local dir = self.smooth_target - origin
+	local total = vmath.length(dir)
+	if total > 0.001 then
+		dir = dir / total
+	else
+		dir = vmath.vector3(0, -1, 0)
+	end
+	for i = 1, SEGMENT_COUNT do
+		local t = (i - 1) / (SEGMENT_COUNT - 1)
+		self.segments[i] = origin + dir * (total * t)
+	end
+
+	-- Full opacity while active
+	-- go.set("#mesh", "tint", vmath.vector4(1, 1, 1, 1))
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- STATE: IDLE  (floating, S-wave, fades at tip)
+-- The tentacle hangs from the owner position, drifting like a free tentacle.
+-- ─────────────────────────────────────────────────────────────────────────────
+function update_idle(self, dt, origin)
+	local seg_len = SEGMENT_LENGTH
+	for i = 1, SEGMENT_COUNT do self.lengths[i] = seg_len end
+
+	-- Initialize random target and timer
+	if not self.idle_target_timer then
+		self.idle_target_timer = 0
+		self.idle_target_angle = math.random() * math.pi * 2
+		self.idle_target_distance = (SEGMENT_COUNT * seg_len * 0.25) + math.random() * (SEGMENT_COUNT * seg_len * 0.25)
+	end
+
+	-- Update timer and change target periodically
+	self.idle_target_timer = self.idle_target_timer + dt
+	if self.idle_target_timer > 2 + math.random() * 3 then -- Random interval between 2-5 seconds
+		self.idle_target_timer = 0
+		self.idle_target_angle = math.random() * math.pi * 2
+		self.idle_target_distance = (SEGMENT_COUNT * seg_len * 0.25) + math.random() * (SEGMENT_COUNT * seg_len * 0.25)
+	end
+
+	-- Calculate random idle target
+	local idle_target = origin + vmath.vector3(
+		math.cos(self.idle_target_angle) * self.idle_target_distance,
+		math.sin(self.idle_target_angle) * self.idle_target_distance,
+		0
+	)
+	self.smooth_target = vmath.lerp(0.04, self.smooth_target, idle_target)
+
+	-- Solve FABRIK into self.segments — this is the clean structural baseline.
+	-- Wave is applied as a visual-only offset in update_mesh and never written
+	-- back here, so it cannot accumulate frame-over-frame into a spiral.
+	fabrik.solve(self.segments, origin, self.smooth_target, self.lengths, 3)
+
+	-- self.idle_alpha = math.min(1.0, (self.idle_alpha or 0) + dt * 2)
+	-- go.set("#mesh", "tint", vmath.vector4(1, 1, 1, self.idle_alpha))
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- STATE: RETRACT  (collapses tip→root, shrinks visible length)
+-- ─────────────────────────────────────────────────────────────────────────────
+function update_retract(self, dt, origin)
+	local dist            = vmath.length(self.retract_start_pos - origin)
+	local total_time      = math.max(0.05, dist / self.retract_speed)
+	self.retract_progress = math.min(1.0, self.retract_progress + dt / total_time)
+
+	-- Pull smooth_target back toward origin along the original direction
+	self.target_pos       = vmath.lerp(self.retract_progress, self.retract_start_pos, origin)
+	self.smooth_target    = vmath.lerp(DAMPING * 2, self.smooth_target, self.target_pos)
+
+	-- Keep straight during retraction (same as ACTIVE)
+	local dir             = self.smooth_target - origin
+	local total           = vmath.length(dir)
+	if total > 0.001 then dir = dir / total else dir = vmath.vector3(0, -1, 0) end
+	for i = 1, SEGMENT_COUNT do
+		local t = (i - 1) / (SEGMENT_COUNT - 1)
+		self.segments[i] = origin + dir * (total * t)
+	end
+
+	-- Fade out as it retracts
+	local alpha = 1.0 - self.retract_progress ^ 0.6
+	-- go.set("#mesh", "tint", vmath.vector4(1, 1, 1, alpha))
+
+	if self.retract_progress >= 1.0 then
+		finish_retract(self)
 	end
 end
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- MESH BUILD  (triangle strip, per-segment width taper)
+-- ─────────────────────────────────────────────────────────────────────────────
 function update_mesh(self)
-	local pos = self.pos_stream
-	local uvs = self.uv_stream
+	local pos    = self.pos_stream
+	local uvs    = self.uv_stream
 	local origin = go.get_world_position()
 
-	-- During retraction, reduce visible segments from tip toward root
-	local visible = SEGMENT_COUNT
-	if self.retracting then
-		visible = math.max(1, math.ceil((1.0 - self.retract_progress) * SEGMENT_COUNT))
+	-- Helper: get perpendicular to direction between adjacent segments
+	local function get_perp(i)
+		local diff
+		local i_prev = math.max(1, i - 1)
+		local i_next = math.min(SEGMENT_COUNT, i + 1)
+		-- Use the span across neighbors for a smoother tangent
+		diff = self.segments[i_next] - self.segments[i_prev]
+		if vmath.length(diff) < 0.001 then
+			-- Fallback: try immediate neighbors
+			if i < SEGMENT_COUNT then
+				diff = self.segments[i + 1] - self.segments[i]
+			else
+				diff = self.segments[i] - self.segments[i - 1]
+			end
+		end
+		if vmath.length(diff) < 0.001 then
+			return vmath.vector3(1, 0, 0)
+		end
+		local d = vmath.normalize(diff)
+		return vmath.vector3(-d.y, d.x, 0)
 	end
 
 	for i = 1, SEGMENT_COUNT do
-		if i > visible then
-			-- Collapse invisible segments to a single point (root), so they don't stick out
-			local li    = ((i - 1) * 2) * 3 + 1
-			local ri    = ((i - 1) * 2 + 1) * 3 + 1
-			local root  = self.segments[visible] - origin -- last visible segment, not segments[1]
-			pos[li]     = root.x
-			pos[li + 1] = root.y
-			pos[li + 2] = 0
-			pos[ri]     = root.x
-			pos[ri + 1] = root.y
-			pos[ri + 2] = 0
-		else
-			local seg = self.segments[i]
-			if not seg or seg.x ~= seg.x then -- nil or NaN check
-				break
-			end
+		local li     = ((i - 1) * 2) * 3 + 1
+		local ri     = ((i - 1) * 2 + 1) * 3 + 1
 
-			local dir
-			if i < visible then
-				local diff = self.segments[i + 1] - self.segments[i]
-				if vmath.length(diff) > 0.001 then
-					dir = vmath.normalize(diff)
-				else
-					dir = vmath.vector3(0, 1, 0)
-				end
-			elseif i > 1 then -- only look backward if there's a previous segment
-				local diff = self.segments[i] - self.segments[i - 1]
-				if vmath.length(diff) > 0.001 then
-					dir = vmath.normalize(diff)
-				else
-					dir = vmath.vector3(0, 1, 0)
-				end
-			else
-				dir = vmath.vector3(0, 1, 0) -- fallback when visible = 1
-			end
+		local seg    = self.segments[i]
+		local perp   = get_perp(i)
 
-			local perp = vmath.vector3(-dir.y, dir.x, 0)
-			if perp.x ~= perp.x or perp.y ~= perp.y then -- NaN check
-				perp = vmath.vector3(1, 0, 0)
-			end
-			local t = visible > 1 and (i - 1) / (visible - 1) or 0
-			local half_w   = TENTACLE_WIDTH + (TENTACLE_TIP_WIDTH - TENTACLE_WIDTH) * t
+		-- t = 0 at root, 1 at tip
+		local t      = (i - 1) / (SEGMENT_COUNT - 1)
+		local half_w = TENTACLE_WIDTH + (TENTACLE_TIP_WIDTH - TENTACLE_WIDTH) * t
 
-			local left     = (seg + perp * half_w) - origin
-			local right    = (seg - perp * half_w) - origin
+		if self.state == STATE_IDLE then
+			-- Wave applied as a pure visual offset here, never written back into
+			-- self.segments, so it resets cleanly every frame and cannot spiral.
+			local tip_w     = t ^ 1.4
+			local wave      = math.sin(self.time * WAVE_FREQUENCY + i * WAVE_PHASE_OFFSET)
+			seg             = seg + perp * (wave * WAVE_AMPLITUDE * tip_w)
 
-			local li       = ((i - 1) * 2) * 3 + 1
-			local ri       = ((i - 1) * 2 + 1) * 3 + 1
-			pos[li]        = left.x
-			pos[li + 1]    = left.y
-			pos[li + 2]    = 0
-			pos[ri]        = right.x
-			pos[ri + 1]    = right.y
-			pos[ri + 2]    = 0
-
-			local uv_li    = ((i - 1) * 2) * 2 + 1
-			local uv_ri    = ((i - 1) * 2 + 1) * 2 + 1
-			uvs[uv_li]     = 0
-			uvs[uv_li + 1] = t
-			uvs[uv_ri]     = 1
-			uvs[uv_ri + 1] = t
+			local fade_frac = math.max(0, (t - FADE_START_FRAC) / (FADE_END_FRAC - FADE_START_FRAC))
+			half_w          = half_w * (1.0 - fade_frac)
 		end
+
+		local left     = (seg + perp * half_w) - origin
+		local right    = (seg - perp * half_w) - origin
+
+		pos[li]        = left.x; pos[li + 1] = left.y; pos[li + 2] = 0
+		pos[ri]        = right.x; pos[ri + 1] = right.y; pos[ri + 2] = 0
+
+		local uv_li    = ((i - 1) * 2) * 2 + 1
+		local uv_ri    = ((i - 1) * 2 + 1) * 2 + 1
+		uvs[uv_li]     = 0; uvs[uv_li + 1] = t
+		uvs[uv_ri]     = 1; uvs[uv_ri + 1] = t
 	end
 
-	buffer.set_metadata(self.buf, hash("AABB"), { -1000, -1000, -1, 1000, 1000, 1 }, buffer.VALUE_TYPE_FLOAT32)
+	buffer.set_metadata(self.buf, hash("AABB"), { -10000, -10000, -1, 20000, 20000, 1 }, buffer.VALUE_TYPE_FLOAT32)
 	resource.set_buffer(self.buf_resource, self.buf)
 end
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- HELPERS
+-- ─────────────────────────────────────────────────────────────────────────────
 function finish_retract(self)
-	self.retracting = false
+	self.state = STATE_IDLE
+	self.idle_alpha = 0
 	local origin = self.owner_pos
 	for i = 1, SEGMENT_COUNT do
 		self.segments[i] = vmath.vector3(origin)
-		self.lengths[i] = SEGMENT_LENGTH
+		self.lengths[i]  = SEGMENT_LENGTH
 	end
-	self.target_pos = vmath.vector3(origin)
+	self.target_pos    = vmath.vector3(origin)
 	self.smooth_target = vmath.vector3(origin)
 	msg.post("#mesh", "disable")
 	msg.post("/player#player", "tentacle_free", { id = msg.url() })
 end
 
 function start_retract(self)
-	self.retracting = true
-	self.retract_start_pos = vmath.vector3(self.target_pos)
-	self.retract_progress = 0
+	self.state             = STATE_RETRACT
+	self.retract_start_pos = vmath.vector3(self.smooth_target)
+	self.retract_progress  = 0
 end
 
 function set_target(self, world_pos)
-	self.target_pos = vmath.vector3(world_pos)
+	go.set("#mesh", "tint", vmath.vector4(1, 1, 1, 1))
+	self.target_pos    = vmath.vector3(world_pos)
+	self.state         = STATE_ACTIVE
+	self.smooth_target = vmath.vector3(self.owner_pos) -- start from root for clean shoot-out
 end
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- MESSAGES
+-- ─────────────────────────────────────────────────────────────────────────────
 function on_message(self, message_id, message)
 	if message_id == SET_TARGET then
 		set_target(self, message.position)
 	elseif message_id == RETRACT then
 		start_retract(self)
-		self.dynamic_length = false
 	elseif message_id == hash("enable_mesh") then
 		msg.post("#mesh", "enable")
+		self.state      = STATE_IDLE
+		self.idle_alpha = 0
+		-- Initialize idle target parameters
+		if not self.idle_target_timer then
+			local seg_len = SEGMENT_LENGTH
+			self.idle_target_timer = 0
+			self.idle_target_angle = math.random() * math.pi * 2
+			self.idle_target_distance = (SEGMENT_COUNT * seg_len * 0.25) +
+				math.random() * (SEGMENT_COUNT * seg_len * 0.25)
+			local idle_target = self.owner_pos + vmath.vector3(
+				math.cos(self.idle_target_angle) * self.idle_target_distance,
+				math.sin(self.idle_target_angle) * self.idle_target_distance,
+				0
+			)
+			self.smooth_target = vmath.lerp(0.1, self.smooth_target, idle_target)
+		end
+	elseif message_id == hash("set_idle") then
+		self.state      = STATE_IDLE
+		self.idle_alpha = 1
+
+		-- Spread segments along the current smooth_target direction
+		-- so FABRIK doesn't start from a degenerate collapsed chain
+		local origin    = self.owner_pos
+		local dir       = self.smooth_target - origin
+		local len       = vmath.length(dir)
+		if len > 0.001 then
+			dir = dir / len
+		else
+			dir = vmath.vector3(0, -1, 0)
+		end
+		for i = 1, SEGMENT_COUNT do
+			local t          = (i - 1) / (SEGMENT_COUNT - 1)
+			self.segments[i] = origin + dir * (t * SEGMENT_COUNT * SEGMENT_LENGTH)
+			self.lengths[i]  = SEGMENT_LENGTH
+		end
+		go.animate("#mesh", "tint", go.PLAYBACK_ONCE_FORWARD, vmath.vector4(0,0,0,0), go.EASING_OUTINSINE, 0.15, 0.15, function()
+			print("Happens ", self.active_index)
+			msg.post("player#player", "free_tentacle", { active_index = self.active_index })
+		end)
 	end
 end

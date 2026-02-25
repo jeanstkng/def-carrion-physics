@@ -9,6 +9,12 @@ function M.solve(segments, origin, target, lengths, iterations)
     iterations = iterations or 10
     local n = #segments
 
+    -- Store previous segments to interpolate for smoother movement
+    local prev_segments = {}
+    for i = 1, n do
+        prev_segments[i] = vmath.vector3(segments[i])
+    end
+
     -- Forward pass (tip -> root)
     local function forward_pass()
         segments[n] = vmath.vector3(target)
@@ -37,6 +43,12 @@ function M.solve(segments, origin, target, lengths, iterations)
     for _ = 1, iterations do
         forward_pass()
         backward_pass()
+    end
+
+    -- Interpolate between previous and new segments for smoother movement when origin changes
+    local interpolation = 0.8 -- 0.0 = full previous, 1.0 = full new (adjust for desired smoothness)
+    for i = 1, n do
+        segments[i] = vmath.lerp(interpolation, prev_segments[i], segments[i])
     end
 end
 

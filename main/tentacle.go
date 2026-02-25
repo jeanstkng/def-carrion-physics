@@ -5,8 +5,9 @@ components {
 embedded_components {
   id: "mesh"
   type: "mesh"
-  data: "material: \"/builtins/materials/model.material\"\n"
+  data: "material: \"/render/model/model.material\"\n"
   "vertices: \"/main/tentacle.buffer\"\n"
+  "textures: \"/assets/pixel.png\"\n"
   "primitive_type: PRIMITIVE_TRIANGLE_STRIP\n"
   ""
 }

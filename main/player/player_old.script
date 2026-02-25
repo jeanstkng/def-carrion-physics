@@ -317,7 +317,6 @@ function fixed_update(self, dt)
 			previous_distance = distance
 		end
 		if distance > self.far_distance then
-			pprint("Achinga")
 			toggle_joint(self, index, false)
 			-- Release the tentacle assigned to this pivot
 		end

@@ -13,4 +13,7 @@ images {
 images {
   image: "/assets/pixel.png"
 }
+images {
+  image: "/assets/pivot.png"
+}
 extrude_borders: 2

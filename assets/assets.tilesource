@@ -1,10 +1,10 @@
 image: "/assets/tile.png"
 tile_width: 128
 tile_height: 128
-collision: "/assets/tile.png"
+collision: "/assets/tile_collision_mask.png"
 convex_hulls {
   index: 0
-  count: 16
+  count: 4
   collision_group: "tile"
 }
 collision_groups: "tile"
