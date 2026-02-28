@@ -28,6 +28,23 @@ function update(self, dt)
 		local direction = vmath.normalize(diff_to_target)
 		target = player_pos + direction * self.max_distance
 	end
+	if self.is_active then
+		-- Let's do a raycast to see if we hit anything
+		-- If we do, we reposition the hand to the hit point if target is further than hit point
+		if distance_to_target > 1 then
+			local raycast_result = physics.raycast(player_pos, target, { hash("tile") })
+			if raycast_result then
+				local hit_pos = raycast_result.position
+				local hit_distance = vmath.length(hit_pos - player_pos)
+				if hit_distance < distance_to_target then
+					target = hit_pos
+				end
+			end
+		end
+		go.set_position(target, "hand_touch")
+	else
+		go.set_position(player_pos, "hand_touch")
+	end
 
 	local current_target = nil
 
@@ -75,9 +92,6 @@ function update(self, dt)
 	local diff = current_target - player_pos
 	local distance = vmath.length(diff)
 
-	if self.is_active then
-		go.set_position(self.target_pos, "hand_touch")
-	end
 
 	-- Evitamos errores si la distancia es 0
 	if distance < 1 then

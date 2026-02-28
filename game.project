@@ -1,6 +1,6 @@
 [bootstrap]
-main_collection = /main/main_new.collectionc
-render = /render/render.renderc
+main_collection = /main/main.collectionc
+render = /render/custom.renderc
 
 [script]
 shared_state = 1
@@ -22,10 +22,8 @@ scale_mode = stretch
 
 [project]
 title = physics_carrion
+dependencies#0 = https://github.com/britzl/defold-metrics/archive/master.zip
 
 [sprite]
 max_count = 5000
-
-[collection]
-max_instances = 10240
 

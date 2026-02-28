@@ -2323,4 +2323,4 @@ layers {
     tile: 0
   }
 }
-material: "/render/tilemap.material"
+material: "/render/tilemap/tilemap.material"

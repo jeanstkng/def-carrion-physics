@@ -1,7 +1,7 @@
 name: "mask"
 tags: "mask"
-vertex_program: "/render/tilemap.vp"
-fragment_program: "/render/tilemap.fp"
+vertex_program: "/render/tilemap/tilemap.vp"
+fragment_program: "/render/tilemap/tilemap.fp"
 vertex_constants {
   name: "view_proj"
   type: CONSTANT_TYPE_VIEWPROJ

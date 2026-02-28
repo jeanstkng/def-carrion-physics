@@ -1,7 +1,12 @@
-local fabrik             = require("main.fabrik")
+local fabrik             = require("main.modules.fabrik")
 
 local SET_TARGET         = hash("set_target")
 local RETRACT            = hash("retract")
+local SET_IDLE           = hash("set_idle")
+local ENABLE_MESH        = hash("enable_mesh")
+local AABB               = hash("AABB")
+local POSITION           = hash("position")
+local TEXCOORD0          = hash("texcoord0")
 
 local SEGMENT_COUNT      = 50
 local SEGMENT_LENGTH     = 15
@@ -20,8 +25,8 @@ local FADE_END_FRAC      = 1.0
 
 -- Tentacle states
 local STATE_IDLE         = "idle"
-local STATE_ACTIVE       = "active" -- attached/in use as pivot
-local STATE_INACTIVE       = "inactive" -- attached/in use as pivot
+local STATE_ACTIVE       = "active"   -- attached/in use as pivot
+local STATE_INACTIVE     = "inactive" -- attached/in use as pivot
 local STATE_RETRACT      = "retract"
 
 go.property("target_pos", vmath.vector3())
@@ -60,11 +65,11 @@ function init(self)
 	-- Vertex buffer: 2 verts per segment → triangle strip
 	local vert_count       = 2 * SEGMENT_COUNT
 	self.buf               = buffer.create(vert_count, {
-		{ name = hash("position"),  type = buffer.VALUE_TYPE_FLOAT32, count = 3 },
-		{ name = hash("texcoord0"), type = buffer.VALUE_TYPE_FLOAT32, count = 2 },
+		{ name = POSITION,  type = buffer.VALUE_TYPE_FLOAT32, count = 3 },
+		{ name = TEXCOORD0, type = buffer.VALUE_TYPE_FLOAT32, count = 2 },
 	})
-	self.pos_stream        = buffer.get_stream(self.buf, hash("position"))
-	self.uv_stream         = buffer.get_stream(self.buf, hash("texcoord0"))
+	self.pos_stream        = buffer.get_stream(self.buf, POSITION)
+	self.uv_stream         = buffer.get_stream(self.buf, TEXCOORD0)
 
 	local unique_path      = "/tentacle_" .. tostring(go.get_id()) .. ".bufferc"
 	self.buf_resource      = resource.create_buffer(unique_path, { buffer = self.buf, transfer_ownership = false })
@@ -78,10 +83,6 @@ end
 function update(self, dt)
 	self.time = self.time + dt
 	local origin = self.owner_pos
-
-	-- if self.state == STATE_INACTIVE then
-	-- 	return
-	-- end
 
 	if self.state == STATE_ACTIVE then
 		update_active(self, dt, origin)
@@ -129,8 +130,8 @@ end
 -- The tentacle hangs from the owner position, drifting like a free tentacle.
 -- ─────────────────────────────────────────────────────────────────────────────
 function update_idle(self, dt, origin)
-	local seg_len = SEGMENT_LENGTH
-	for i = 1, SEGMENT_COUNT do self.lengths[i] = seg_len end
+    local seg_len = math.max(2, vmath.length(self.smooth_target - origin) / SEGMENT_COUNT)  -- ← dynamic
+    for i = 1, SEGMENT_COUNT do self.lengths[i] = seg_len end
 
 	-- Initialize random target and timer
 	if not self.idle_target_timer then
@@ -194,9 +195,7 @@ function update_retract(self, dt, origin)
 	end
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- MESH BUILD  (triangle strip, per-segment width taper)
--- ─────────────────────────────────────────────────────────────────────────────
 function update_mesh(self)
 	local pos    = self.pos_stream
 	local uvs    = self.uv_stream
@@ -258,13 +257,10 @@ function update_mesh(self)
 		uvs[uv_ri]     = 1; uvs[uv_ri + 1] = t
 	end
 
-	buffer.set_metadata(self.buf, hash("AABB"), { -10000, -10000, -1, 20000, 20000, 1 }, buffer.VALUE_TYPE_FLOAT32)
+	buffer.set_metadata(self.buf, AABB, { -10000, -10000, -1, 20000, 20000, 1 }, buffer.VALUE_TYPE_FLOAT32)
 	resource.set_buffer(self.buf_resource, self.buf)
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
--- HELPERS
--- ─────────────────────────────────────────────────────────────────────────────
 function finish_retract(self)
 	self.state = STATE_IDLE
 	self.idle_alpha = 0
@@ -292,15 +288,12 @@ function set_target(self, world_pos)
 	self.smooth_target = vmath.vector3(self.owner_pos) -- start from root for clean shoot-out
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
--- MESSAGES
--- ─────────────────────────────────────────────────────────────────────────────
 function on_message(self, message_id, message)
 	if message_id == SET_TARGET then
 		set_target(self, message.position)
 	elseif message_id == RETRACT then
 		start_retract(self)
-	elseif message_id == hash("enable_mesh") then
+	elseif message_id == ENABLE_MESH then
 		msg.post("#mesh", "enable")
 		self.state      = STATE_IDLE
 		self.idle_alpha = 0
@@ -318,28 +311,35 @@ function on_message(self, message_id, message)
 			)
 			self.smooth_target = vmath.lerp(0.1, self.smooth_target, idle_target)
 		end
-	elseif message_id == hash("set_idle") then
-		self.state      = STATE_IDLE
+	elseif message_id == SET_IDLE then
+		self.state = STATE_IDLE
 		self.idle_alpha = 1
 
-		-- Spread segments along the current smooth_target direction
-		-- so FABRIK doesn't start from a degenerate collapsed chain
-		local origin    = self.owner_pos
-		local dir       = self.smooth_target - origin
-		local len       = vmath.length(dir)
-		if len > 0.001 then
-			dir = dir / len
-		else
-			dir = vmath.vector3(0, -1, 0)
-		end
-		for i = 1, SEGMENT_COUNT do
-			local t          = (i - 1) / (SEGMENT_COUNT - 1)
-			self.segments[i] = origin + dir * (t * SEGMENT_COUNT * SEGMENT_LENGTH)
-			self.lengths[i]  = SEGMENT_LENGTH
-		end
-		go.animate("#mesh", "tint", go.PLAYBACK_ONCE_FORWARD, vmath.vector4(0,0,0,0), go.EASING_OUTINSINE, 0.15, 0.15, function()
-			print("Happens ", self.active_index)
+		local origin = self.owner_pos
+		local dir = self.smooth_target - origin
+		local len = vmath.length(dir)
+
+		if len < 100 then
+			self.state = STATE_IDLE
+			go.set("#mesh", "tint", vmath.vector4(0, 0, 0, 0))
 			msg.post("player#player", "free_tentacle", { active_index = self.active_index })
-		end)
+		else
+			local seg_len = len / SEGMENT_COUNT -- ← key line: match chain to real length
+			if len > 0.001 then
+				dir = dir / len
+			else
+				dir = vmath.vector3(0, -1, 0)
+			end
+			for i = 1, SEGMENT_COUNT do
+				local t = (i - 1) / (SEGMENT_COUNT - 1)
+				self.segments[i] = origin + dir * (t * len)
+				self.lengths[i] = seg_len -- ← use scaled length, not fixed SEGMENT_LENGTH
+			end
+			go.animate("#mesh", "tint", go.PLAYBACK_ONCE_FORWARD, vmath.vector4(0, 0, 0, 0), go.EASING_OUTINSINE, 0.15,
+				0.15,
+				function()
+					msg.post("player#player", "free_tentacle", { active_index = self.active_index })
+				end)
+		end
 	end
 end

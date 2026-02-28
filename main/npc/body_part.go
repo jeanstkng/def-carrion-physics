@@ -2,7 +2,7 @@ embedded_components {
   id: "part"
   type: "sprite"
   data: "default_animation: \"tile\"\n"
-  "material: \"/render/sprite.material\"\n"
+  "material: \"/render/sprite/sprite.material\"\n"
   "size {\n"
   "  x: 64.0\n"
   "  y: 64.0\n"

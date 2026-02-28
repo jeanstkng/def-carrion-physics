@@ -1,12 +1,12 @@
 components {
   id: "tentacle"
-  component: "/main/tentacle.script"
+  component: "/main/player/tentacle.script"
 }
 embedded_components {
   id: "mesh"
   type: "mesh"
   data: "material: \"/render/model/model.material\"\n"
-  "vertices: \"/main/tentacle.buffer\"\n"
+  "vertices: \"/main/player/tentacle.buffer\"\n"
   "textures: \"/assets/pixel.png\"\n"
   "primitive_type: PRIMITIVE_TRIANGLE_STRIP\n"
   ""

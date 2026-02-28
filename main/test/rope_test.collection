@@ -4,7 +4,7 @@ embedded_instances {
   id: "go"
   data: "components {\n"
   "  id: \"tentacle\"\n"
-  "  component: \"/main/tentacle.script\"\n"
+  "  component: \"/main/player/tentacle.script\"\n"
   "}\n"
   ""
   position {

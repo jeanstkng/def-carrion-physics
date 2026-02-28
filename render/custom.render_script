@@ -15,17 +15,17 @@
 --
 -- message constants
 --
-local MSG_CLEAR_COLOR =         hash("clear_color")
-local MSG_WINDOW_RESIZED =      hash("window_resized")
-local MSG_SET_VIEW_PROJ =       hash("set_view_projection")
-local MSG_SET_CAMERA_PROJ =     hash("use_camera_projection")
-local MSG_USE_STRETCH_PROJ =    hash("use_stretch_projection")
-local MSG_USE_FIXED_PROJ =      hash("use_fixed_projection")
-local MSG_USE_FIXED_FIT_PROJ =  hash("use_fixed_fit_projection")
+local MSG_CLEAR_COLOR = hash("clear_color")
+local MSG_WINDOW_RESIZED = hash("window_resized")
+local MSG_SET_VIEW_PROJ = hash("set_view_projection")
+local MSG_SET_CAMERA_PROJ = hash("use_camera_projection")
+local MSG_USE_STRETCH_PROJ = hash("use_stretch_projection")
+local MSG_USE_FIXED_PROJ = hash("use_fixed_projection")
+local MSG_USE_FIXED_FIT_PROJ = hash("use_fixed_fit_projection")
 
 local DEFAULT_NEAR = -1
-local DEFAULT_FAR =   1
-local DEFAULT_ZOOM =  1
+local DEFAULT_FAR = 1
+local DEFAULT_ZOOM = 1
 
 --
 -- projection that centers content with maintained aspect ratio and optional zoom
@@ -103,10 +103,10 @@ local function init_camera(camera, projection_fn, near, far, zoom)
 end
 
 local function create_predicates(...)
-    local arg = {...}
+    local arg = { ... }
     local predicates = {}
     for _, predicate_name in pairs(arg) do
-        predicates[predicate_name] = render.predicate({predicate_name})
+        predicates[predicate_name] = render.predicate({ predicate_name })
     end
     return predicates
 end
@@ -170,7 +170,8 @@ local function reset_camera_world(state)
 end
 
 function init(self)
-    self.predicates = create_predicates("tile", "sprite", "gui", "particle", "model", "debug_text", "splat", "mask", "masked")
+    self.predicates = create_predicates("tile", "sprite", "gui", "particle", "model", "debug_text", "splat", "mask",
+        "masked")
 
     -- default is stretch projection. copy from builtins and change for different projection
     -- or send a message to the render script to change projection:
@@ -227,52 +228,52 @@ function update(self)
     render.set_depth_mask(false)
     render.disable_state(graphics.STATE_DEPTH_TEST)
     render.enable_state(graphics.STATE_BLEND)
-    
+
     -- STENCIL RENDERING: Use tiles as mask for splats
     -- Enable stencil test and configure for writing tiles to stencil buffer
     render.enable_state(graphics.STATE_STENCIL_TEST)
     render.set_stencil_mask(0xFF)
     render.set_stencil_func(graphics.COMPARE_FUNC_ALWAYS, 1, 0xFF)
     render.set_stencil_op(graphics.STENCIL_OP_KEEP, graphics.STENCIL_OP_KEEP, graphics.STENCIL_OP_REPLACE)
-    
+
     -- Draw tiles (both to screen and stencil buffer)
     render.draw(predicates.tile, draw_options_world)
-    
+
     -- Now configure stencil to only draw where tiles were (stencil == 1)
     render.set_stencil_mask(0x00)
     render.set_stencil_func(graphics.COMPARE_FUNC_EQUAL, 1, 0xFF)
-    
+
     -- Draw splats only where tiles exist
     render.draw(predicates.splat, draw_options_world)
-    
+
     -- Clear stencil buffer before mask/masked pass to separate from tile/splat
     render.set_stencil_mask(0xFF)
-    render.clear({[graphics.BUFFER_TYPE_STENCIL_BIT] = 0})
-    
+    render.clear({ [graphics.BUFFER_TYPE_STENCIL_BIT] = 0 })
+
     -- STENCIL RENDERING: Use mask predicate to mask masked predicate
     -- Configure for writing mask to stencil buffer
     render.set_stencil_func(graphics.COMPARE_FUNC_ALWAYS, 1, 0xFF)
     render.set_stencil_op(graphics.STENCIL_OP_KEEP, graphics.STENCIL_OP_KEEP, graphics.STENCIL_OP_REPLACE)
-    
+
     -- Disable color writes - mask only writes to stencil, not visible on screen
     render.set_color_mask(false, false, false, false)
-    
+
     -- Draw mask (only to stencil buffer, invisible)
     render.draw(predicates.mask, draw_options_world)
-    
+
     -- Re-enable color writes for masked and subsequent draws
     render.set_color_mask(true, true, true, true)
-    
+
     -- Now configure stencil to only draw where mask was (stencil == 1)
     render.set_stencil_mask(0x00)
     render.set_stencil_func(graphics.COMPARE_FUNC_EQUAL, 1, 0xFF)
-    
+
     -- Draw masked only where mask exists
     render.draw(predicates.masked, draw_options_world)
-    
+
     -- Disable stencil test for remaining draws
     render.disable_state(graphics.STATE_STENCIL_TEST)
-    
+
     render.draw(predicates.sprite, draw_options_world)
     render.draw(predicates.particle, draw_options_world)
 
@@ -281,16 +282,20 @@ function update(self)
     reset_camera_world(state)
 
     -- render GUI
-    --
     local camera_gui = state.cameras.camera_gui
     render.set_view(camera_gui.view)
     render.set_projection(camera_gui.proj)
 
     render.enable_state(graphics.STATE_STENCIL_TEST)
+
+    -- Reset stencil state so GUI draws everywhere
+    render.set_stencil_mask(0xFF)
+    render.clear({ [graphics.BUFFER_TYPE_STENCIL_BIT] = 0 })
+    render.set_stencil_func(graphics.COMPARE_FUNC_ALWAYS, 0, 0xFF)
+
     render.draw(predicates.gui, camera_gui.options)
     render.draw(predicates.debug_text, camera_gui.options)
     render.disable_state(graphics.STATE_STENCIL_TEST)
-    render.disable_state(graphics.STATE_BLEND)
 end
 
 function on_message(self, message_id, message)

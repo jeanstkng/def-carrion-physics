@@ -1,6 +1,6 @@
 components {
   id: "particle"
-  component: "/main/player/particle.script"
+  component: "/main/particle/particle.script"
 }
 embedded_components {
   id: "sprite"

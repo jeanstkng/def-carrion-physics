@@ -22,12 +22,6 @@ local DEBUG = false
 
 local CAMERA_ID = "cam#camera"
 
--- Tentacle state constants (must match tentacle.script)
-local IDLE = 1
-local GOING = 2
-local RETURNING = 3
-local ATTACHED = 4
-
 local MAX_SPLATS = 100
 
 go.property("speed", 5000)
@@ -85,12 +79,8 @@ end
 local function drop_tentacle(self, pivot_index, player_pos)
 	for index, value in ipairs(self.active_tentacles) do
 		if value.pivot_index == pivot_index then
-			print("pivot pos: ", go.get_position(self.pivot_ids[value.pivot_index]))
 			value.pivot_index = nil
 			value.is_available = false
-			print("player ->", player_pos, " last ->", value.last_target_pos, " le index ->", index)
-			-- local target_pos = get_position_from_target_towards_pos(player_pos, value.last_target_pos, 3)
-			-- go.animate(value.id, "target_pos", go.PLAYBACK_ONCE_FORWARD, target_pos, go.EASING_LINEAR, 0.35)
 			go.set(value.id, "active_index", index)
 			msg.post(value.id, "set_idle")
 			break
@@ -133,7 +123,7 @@ local function move_pivots_smoothly(self, hits, tentacle_moved)
 
 		msg.post(id, "set_target", { position = player_pos })
 
-		go.set(self.pivot_ids[tentacle_moved] .. "#sprite", "tint.w", 0)
+		go.set(self.pivots[tentacle_moved].sprite, "tint.w", 0)
 
 		go.animate(self.pivot_ids[tentacle_moved], "position", go.PLAYBACK_ONCE_FORWARD,
 			hits[tentacle_moved].position,
@@ -141,7 +131,7 @@ local function move_pivots_smoothly(self, hits, tentacle_moved)
 			self.tentacle_timeout, 0, function(self, url, property)
 				self.animations[tentacle_moved] = true
 
-				go.animate(self.pivot_ids[tentacle_moved] .. "#sprite", "tint.w", go.PLAYBACK_ONCE_FORWARD, 1,
+				go.animate(self.pivots[tentacle_moved].sprite, "tint.w", go.PLAYBACK_ONCE_FORWARD, 1,
 					go.EASING_INOUTEXPO, 0.15)
 
 				self.moved_tentacles = self.moved_tentacles + 1
@@ -151,6 +141,20 @@ local function move_pivots_smoothly(self, hits, tentacle_moved)
 				end
 			end)
 	end
+end
+
+local function recalculate_to(self)
+	if not self.last_screen_pos then
+		return
+	end
+	self.mouse_world = camera.screen_to_world(self.last_screen_pos, CAMERA_ID)
+
+	local dx = self.mouse_world.x - self.player_pos.x
+	local dy = self.mouse_world.y - self.player_pos.y
+	local angle = math.atan2(dy, dx)
+
+	local direction = vmath.vector3(math.cos(angle), math.sin(angle), 0)
+	self.to = self.player_pos + direction * self.far_distance
 end
 
 function init(self)
@@ -165,26 +169,29 @@ function init(self)
 	self.pivot_ids = {} -- Pivot Game Object IDs
 	self.joint_ids = {}
 	self.joints_enabled = {}
-	self.debug_labels = {}
 	self.animations = {}
+	self.player_pos = go.get_position()
 
 
 	for i = 1, 3, 1 do
-		local pivot_id = "pivot_" .. tostring(i)
-		table.insert(self.pivot_ids, pivot_id)
-		table.insert(self.pivots, pivot_id .. "#collisionobject")
+		table.insert(self.joint_ids, "pivot_" .. tostring(i) .. "_joint")
 
-		table.insert(self.debug_labels, pivot_id .. "#label")
-
-		table.insert(self.joint_ids, pivot_id .. "_joint")
 		table.insert(self.joints_enabled, false)
 		table.insert(self.animations, true)
 
-		go.set(pivot_id .. "#sprite", "tint.w", 0)
+		local built_pivot = factory.create("pivot#factory", self.player_pos)
+
+		table.insert(self.pivot_ids, built_pivot)
+
+		local pivot_co = msg.url(nil, built_pivot, "collisionobject")
+		local pivot_sp = msg.url(nil, built_pivot, "sprite")
+
+		table.insert(self.pivots, { collision = pivot_co, sprite = pivot_sp })
+
+		go.set(pivot_sp, "tint.w", 0)
 	end
 
 	self.active_tentacles = {}
-	self.player_pos = go.get_position()
 	for i = 1, 9, 1 do
 		local id = factory.create(
 			"/tentacles#factory",
@@ -228,20 +235,6 @@ function init(self)
 	self.mouse_world = vmath.vector3()
 end
 
-local function recalculate_to(self)
-	if not self.last_screen_pos then
-		return
-	end
-	self.mouse_world = camera.screen_to_world(self.last_screen_pos, CAMERA_ID)
-
-	local dx = self.mouse_world.x - self.player_pos.x
-	local dy = self.mouse_world.y - self.player_pos.y
-	local angle = math.atan2(dy, dx)
-
-	local direction = vmath.vector3(math.cos(angle), math.sin(angle), 0)
-	self.to = self.player_pos + direction * self.far_distance
-end
-
 function update(self, dt)
 	-- Recalculate self.to every frame so it stays valid as camera/player move
 	recalculate_to(self)
@@ -266,7 +259,7 @@ function update(self, dt)
 	-- Pivoting
 	local weight_pos = go.get_position(self.weight_spring)
 	for _, value in ipairs(self.pivots) do
-		local pivot_pos = go.get_position(value)
+		local pivot_pos = go.get_position(value.collision)
 		draw_line(pivot_pos, weight_pos, GREEN)
 	end
 
@@ -298,15 +291,6 @@ function update(self, dt)
 	else
 		go.set(self.hand_id, "target_pos", self.player_pos)
 	end
-
-
-	-- Debugger set labels
-	if DEBUG then
-		for index, value in ipairs(self.debug_labels) do
-			label.set_text(value,
-				tostring(self.joints_enabled[index]) .. "-" .. tostring(index) .. "-" .. tostring(self.animations[index]))
-		end
-	end
 end
 
 function fixed_update(self, dt)
@@ -317,8 +301,8 @@ function fixed_update(self, dt)
 		local player_pos = go.get_position()
 		local distance = vmath.length(player_pos - pivot_pos)
 		--[[
-		si el pivote actual es el mas cercano al jugador
-		entonces usamos ese valor para closest_index
+		if actual pivot is the closest to the player
+		then we use that value for closest_index
 		]]
 		if index == 1 then
 			self.closest_index = index
@@ -413,15 +397,7 @@ function on_message(self, message_id, message, sender)
 				end)
 		end
 	elseif message_id == REACHED then
-		-- local reached_index = message.index
-		pprint("Reached index")
-		-- local actual_state = self.tentacles[reached_index].state
-		-- if actual_state == RETURNING then
-		-- 	self.tentacles[reached_index].prev_state = actual_state
-		-- 	self.tentacles[reached_index].state = IDLE
-		-- 	self.tentacles[reached_index].pivot_index = nil
-		-- 	go.set(self.tentacles[reached_index].id, "use_speed", false)
-		-- end
+		-- pprint("Reached index")
 	elseif message_id == hash("free_tentacle") then
 		self.active_tentacles[message.active_index].is_available = true
 	end
@@ -488,7 +464,7 @@ function toggle_joint(self, idx, enable_joint)
 				self.weight_spring,
 				self.joint_ids[idx],
 				center_anchor,
-				self.pivots[idx],
+				self.pivots[idx].collision,
 				center_anchor,
 				{ length = 10, frequency = .1, damping = 1 }
 			)
