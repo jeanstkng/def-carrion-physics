@@ -104,8 +104,9 @@ function update_active(self, dt, origin)
 	local seg_len = math.max(2, dist / SEGMENT_COUNT)
 	for i = 1, SEGMENT_COUNT do self.lengths[i] = seg_len end
 
-	-- Smooth follow but stay straight
-	self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target_pos)
+	-- Smooth follow but stay straight Note: Modified to use value of 1 to avoid pivot sprite showing before tentacle reach target.
+	self.smooth_target = vmath.lerp(1, self.smooth_target, self.target_pos)
+	-- self.smooth_target = vmath.lerp(DAMPING, self.smooth_target, self.target_pos)
 
 	-- Build a perfectly straight chain from origin → smooth_target
 	-- FABRIK would work but straight interpolation is cleaner / no artifacts
@@ -324,7 +325,7 @@ function on_message(self, message_id, message)
 			go.set("#mesh", "tint", vmath.vector4(0, 0, 0, 0))
 			msg.post("player#player", "free_tentacle", { active_index = self.active_index })
 		else
-			local seg_len = len / SEGMENT_COUNT -- ← key line: match chain to real length
+			local seg_len = len / SEGMENT_COUNT -- match chain to real length
 			if len > 0.001 then
 				dir = dir / len
 			else
@@ -333,7 +334,7 @@ function on_message(self, message_id, message)
 			for i = 1, SEGMENT_COUNT do
 				local t = (i - 1) / (SEGMENT_COUNT - 1)
 				self.segments[i] = origin + dir * (t * len)
-				self.lengths[i] = seg_len -- ← use scaled length, not fixed SEGMENT_LENGTH
+				self.lengths[i] = seg_len -- use scaled length, not fixed SEGMENT_LENGTH
 			end
 			go.animate("#mesh", "tint", go.PLAYBACK_ONCE_FORWARD, vmath.vector4(0, 0, 0, 0), go.EASING_OUTINSINE, 0.15,
 				0.15,

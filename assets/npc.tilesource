@@ -1,0 +1,26 @@
+image: "/assets/npc.png"
+tile_width: 128
+tile_height: 128
+collision: "/assets/npc.png"
+convex_hulls {
+  index: 0
+  count: 11
+  collision_group: "npc"
+}
+convex_hulls {
+  index: 11
+  count: 4
+  collision_group: "npc"
+}
+collision_groups: "npc"
+animations {
+  id: "lower"
+  start_tile: 2
+  end_tile: 2
+}
+animations {
+  id: "upper"
+  start_tile: 1
+  end_tile: 1
+}
+extrude_borders: 2

@@ -6,6 +6,9 @@ local TOUCH = hash("touch")
 local SECONDARY_TOUCH = hash("secondary_touch")
 local PARTICLE_TOUCHED_WALL = hash("particle_touched_wall")
 local REACHED = hash("reached")
+local FREE_TENTACLE = hash("free_tentacle")
+local TRIGGER_RESPONSE = hash("trigger_response")
+local NPC_PART = hash("npc_part")
 
 -- Cone raycast parameters
 local CONE_ANGLE = 15      -- Total cone angle in degrees
@@ -131,8 +134,7 @@ local function move_pivots_smoothly(self, hits, tentacle_moved)
 			self.tentacle_timeout, 0, function(self, url, property)
 				self.animations[tentacle_moved] = true
 
-				go.animate(self.pivots[tentacle_moved].sprite, "tint.w", go.PLAYBACK_ONCE_FORWARD, 1,
-					go.EASING_INOUTEXPO, 0.15)
+				go.set(self.pivots[tentacle_moved].sprite, "tint.w", 1)
 
 				self.moved_tentacles = self.moved_tentacles + 1
 
@@ -213,6 +215,7 @@ function init(self)
 	go.set(self.hand_id, "target_pos", self.player_pos)
 
 	self.weight_spring = "player#collisionobject"
+	msg.post("#trigger", "disable")
 
 	self.hits = {}
 	self.rear_hits = {}
@@ -398,8 +401,15 @@ function on_message(self, message_id, message, sender)
 		end
 	elseif message_id == REACHED then
 		-- pprint("Reached index")
-	elseif message_id == hash("free_tentacle") then
+	elseif message_id == FREE_TENTACLE then
 		self.active_tentacles[message.active_index].is_available = true
+	elseif message_id == TRIGGER_RESPONSE then
+		if message.enter and message.other_group == NPC_PART then
+			print("Hmm?",message.other_group )
+			self.blood_emitter.start()
+			self.blood_emitter.start()
+			msg.post(message.other_id, "disassembly")
+		end
 	end
 end
 
@@ -413,10 +423,12 @@ function on_input(self, action_id, action)
 			self.secondary_mouse_pressed = true
 			go.set(self.hand_id, "is_active", true)
 			msg.post("hand_touch#touch", "enable")
+			msg.post("#trigger", "enable")
 		elseif action.released then
 			go.set(self.hand_id, "is_active", false)
 			self.secondary_mouse_pressed = false
 			msg.post("hand_touch#touch", "disable")
+			msg.post("#trigger", "disable")
 		end
 	elseif action_id == TOUCH then
 		if action.pressed then

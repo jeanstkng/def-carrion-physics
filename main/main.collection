@@ -21,7 +21,7 @@ collection_instances {
   collection: "/main/npc/npc.collection"
   position {
     x: 1611.0
-    y: -319.0
+    y: -256.0
   }
 }
 scale_along_z: 0
@@ -117,6 +117,32 @@ embedded_instances {
   "}\\n"
   "angular_damping: 0.1\\n"
   "locked_rotation: true\\n"
+  "\"\n"
+  "}\n"
+  "embedded_components {\n"
+  "  id: \"trigger\"\n"
+  "  type: \"collisionobject\"\n"
+  "  data: \"type: COLLISION_OBJECT_TYPE_TRIGGER\\n"
+  "mass: 0.0\\n"
+  "friction: 0.0\\n"
+  "restitution: 0.0\\n"
+  "group: \\\"player_trigger\\\"\\n"
+  "mask: \\\"npc_part\\\"\\n"
+  "embedded_collision_shape {\\n"
+  "  shapes {\\n"
+  "    shape_type: TYPE_SPHERE\\n"
+  "    position {\\n"
+  "    }\\n"
+  "    rotation {\\n"
+  "    }\\n"
+  "    index: 0\\n"
+  "    count: 1\\n"
+  "  }\\n"
+  "  data: 64.0\\n"
+  "}\\n"
+  "locked_rotation: true\\n"
+  "event_collision: false\\n"
+  "event_contact: false\\n"
   "\"\n"
   "}\n"
   ""

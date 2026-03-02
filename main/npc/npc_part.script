@@ -1,0 +1,9 @@
+local DISASSEMBLY = hash("disassembly")
+local SECONDARY_TOUCH = hash("secondary_touch")
+
+function on_message(self, message_id, message, sender)
+	if message_id == DISASSEMBLY then
+		msg.post("full_body#npc", "disassembly")
+	end
+end
+

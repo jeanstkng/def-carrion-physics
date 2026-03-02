@@ -1,18 +1,16 @@
 name: "npc"
 instances {
-  id: "lower"
-  prototype: "/main/npc/body_part.go"
+  id: "upper"
+  prototype: "/main/npc/upper.go"
   position {
-    y: -32.0
-    z: 1.0
+    y: 64.0
   }
 }
 instances {
-  id: "upper"
-  prototype: "/main/npc/body_part.go"
+  id: "lower"
+  prototype: "/main/npc/lower.go"
   position {
-    y: 32.0
-    z: 1.0
+    y: -64.0
   }
 }
 scale_along_z: 0

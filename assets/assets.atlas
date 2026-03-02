@@ -5,9 +5,6 @@ images {
   image: "/assets/tentacle.png"
 }
 images {
-  image: "/assets/tile.png"
-}
-images {
   image: "/assets/blood_splat.png"
 }
 images {

@@ -1,6 +1,8 @@
+local DISASSEMBLY = hash("disassembly")
+
 function init(self)
 	local center_anchor = vmath.vector3(0, 0, 0)
-	local lower_anchor = vmath.vector3(0, -64, 0)
+	local lower_anchor = vmath.vector3(0, -128, 0)
 
 	local hinge_props = {
 		enable_limit = true,
@@ -10,13 +12,24 @@ function init(self)
 
 	physics.create_joint(
 		physics.JOINT_TYPE_HINGE,
-		"upper#dynamic",
+		"lower#dynamic",
 		"body_joint",
 		center_anchor,
-		"lower#dynamic",
+		"upper#dynamic",
 		lower_anchor,
 		hinge_props
 	)
 
 	self.upper_body_pos = vmath.vector3()
+
+	self.is_dead = false
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == DISASSEMBLY and not self.is_dead then
+		self.is_dead = true
+		timer.delay(0.10, false, function(handle, time_elapsed)
+			physics.destroy_joint("lower#dynamic", "body_joint")
+		end)
+	end
 end

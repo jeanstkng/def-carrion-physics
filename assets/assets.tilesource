@@ -1,11 +1,86 @@
-image: "/assets/tile.png"
+image: "/assets/tileset.png"
 tile_width: 128
 tile_height: 128
-collision: "/assets/tile_collision_mask.png"
+collision: "/assets/tileset_collision_mask.png"
 convex_hulls {
   index: 0
+  count: 5
+  collision_group: "tile"
+}
+convex_hulls {
+  index: 5
   count: 4
   collision_group: "tile"
+}
+convex_hulls {
+  index: 9
+  count: 5
+  collision_group: "tile"
+}
+convex_hulls {
+  index: 14
+  count: 5
+  collision_group: "tile"
+}
+convex_hulls {
+  index: 19
+  count: 5
+  collision_group: "tile"
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: "tile"
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: "tile"
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
+}
+convex_hulls {
+  index: 24
+  count: 0
+  collision_group: ""
 }
 collision_groups: "tile"
 animations {
@@ -15,3 +90,4 @@ animations {
   playback: PLAYBACK_NONE
   fps: 1
 }
+extrude_borders: 2

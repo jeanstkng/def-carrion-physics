@@ -20,5 +20,6 @@ animations {
   }
   playback: PLAYBACK_LOOP_FORWARD
   fps: 15
+  flip_horizontal: 1
 }
 extrude_borders: 2
